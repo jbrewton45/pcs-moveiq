@@ -315,7 +315,7 @@ function WeightAllowanceCard({
 interface Props {
   projectId: string;
   onBack: () => void;
-  onSelectRoom: (id: string, name: string, type: string) => void;
+  onSelectRoom: (id: string) => void;
   roomsRefreshKey: number;
 }
 
@@ -382,14 +382,12 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
 
   useEffect(() => {
     setLoadingRooms(true);
-    api.getProjectWeight(projectId).then(setWeightData).catch(() => setWeightData(null));
-    Promise.all([
-      api.listRooms(projectId),
-      api.listItems({ projectId }),
-      api.getProjectSummary(projectId),
-    ])
-      .then(([fetchedRooms, fetchedItems, fetchedSummary]: [Room[], Item[], Record<string, number>]) => {
-        setRooms(fetchedRooms);
+    api
+      .getProjectWorkspace(projectId)
+      .then((workspace) => {
+        setProject(workspace.project);
+        setRooms(workspace.rooms);
+        const fetchedItems = workspace.items;
         const counts: Record<string, number> = {};
         const reviewed: Record<string, number> = {};
         for (const item of fetchedItems) {
@@ -400,9 +398,10 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
         }
         setItemCounts(counts);
         setReviewedCounts(reviewed);
-        setSummary(fetchedSummary);
+        setSummary(workspace.summary);
         setTotalItems(fetchedItems.length);
         setAllItems(fetchedItems);
+        setWeightData(workspace.weight);
       })
       .catch(() => {
         setRooms([]);
@@ -411,6 +410,7 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
         setSummary({});
         setTotalItems(0);
         setAllItems([]);
+        setWeightData(null);
       })
       .finally(() => setLoadingRooms(false));
   }, [projectId, localRoomsKey, roomsRefreshKey]);
@@ -883,10 +883,10 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
                         className="room-card__nav-area"
                         role="button"
                         tabIndex={0}
-                        onClick={() => onSelectRoom(room.id, room.roomName, room.roomType)}
+                        onClick={() => onSelectRoom(room.id)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
-                            onSelectRoom(room.id, room.roomName, room.roomType);
+                            onSelectRoom(room.id);
                           }
                         }}
                       >

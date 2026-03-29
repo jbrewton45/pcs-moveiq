@@ -1,4 +1,4 @@
-import type { Project, Room, Item, Comparable, UserPublic } from "./types";
+import type { Project, Room, Item, Comparable, ProjectWorkspace, UserPublic } from "./types";
 
 const BASE = "/api";
 
@@ -122,6 +122,9 @@ export const api = {
 
   getProjectWeight: (id: string) =>
     request<{ totalWeight: number; roomWeights: Record<string, number>; itemsWithWeight: number; itemsWithoutWeight: number }>(`/projects/${id}/weight`),
+
+  getProjectWorkspace: (id: string) =>
+    request<ProjectWorkspace>(`/projects/${id}/workspace`),
 
   uploadItemPhoto: (id: string, file: File) => {
     const form = new FormData();
