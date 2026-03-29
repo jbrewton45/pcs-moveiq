@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PCS MoveIQ</string>
+    <string name="title_activity_main">PCS MoveIQ</string>
+    <string name="package_name">com.pcsmoveiq.app</string>
+    <string name="custom_url_scheme">com.pcsmoveiq.app</string>
+</resources>
