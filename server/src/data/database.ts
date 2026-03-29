@@ -1,7 +1,10 @@
 import Database from "better-sqlite3";
 import path from "path";
 
-const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), "moveiq.db");
+// Resolve DB path relative to this file's location so it's consistent
+// regardless of which directory the server process is started from.
+// __dirname = server/dist at runtime → ../../moveiq.db = project root/moveiq.db
+const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, "../../moveiq.db");
 
 export const db = new Database(DB_PATH);
 
