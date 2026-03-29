@@ -184,8 +184,8 @@ export async function openaiPricing(input: PricingInput): Promise<PricingOutput 
     // Emphasize model-specific pricing when brand + model are available
     const modelEmphasis =
       input.brand && input.model
-        ? `\nIMPORTANT: Price this specific model (${input.brand} ${input.model}), not the generic category. Use known market prices for this exact model.`
-        : "";
+        ? `\nIMPORTANT: Price this specific model (${input.brand} ${input.model}), not the generic category. Use known market prices for this exact model.\nIf the item appears to include accessories, a bundle, or a full kit, note this in your reasoning. Price the specific configuration described, not just the base unit.`
+        : "\nIf the item appears to include accessories, a bundle, or a full kit, note this in your reasoning. Price the specific configuration described, not just the base unit.";
 
     const response = await api.chat.completions.create({
       model: "gpt-4o",

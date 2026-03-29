@@ -7,6 +7,7 @@ import { BulkDeleteSchema, BulkUpdateStatusSchema, CreateItemSchema, UpdateItemS
 import { db } from "../data/database.js";
 import { rowToItem } from "../utils/converters.js";
 import { z } from "zod/v4";
+import { parseVoiceTranscript } from "../services/voice.service.js";
 
 export function getItems(req: Request, res: Response) {
   const projectId = req.query.projectId as string | undefined;
@@ -106,4 +107,13 @@ export function submitClarifications(req: Request, res: Response) {
   if (!updated) return res.status(404).json({ error: "Item not found" });
 
   return res.status(200).json(rowToItem(updated as Record<string, unknown>));
+}
+
+export async function parseVoice(req: Request, res: Response) {
+  const { transcript, roomType } = req.body as { transcript?: string; roomType?: string };
+  if (!transcript || typeof transcript !== "string" || transcript.trim().length === 0) {
+    return res.status(400).json({ error: "transcript is required" });
+  }
+  const result = await parseVoiceTranscript(transcript.trim(), roomType);
+  return res.status(200).json(result);
 }

@@ -8,6 +8,7 @@ import { openaiPricing, openaiWebSearchComparables, isOpenAIAvailable } from "..
 import { isEbayAvailable, ebayComparables } from "../providers/ebay.provider.js";
 import { rederiveRecommendation } from "./items.service.js";
 import { normalizeModel, applyPriceGuardrails } from "../utils/model-normalizer.js";
+import { groupComparablesByConfig } from "../utils/comparable-config.js";
 
 interface PricingResult {
   fastSale: number;
@@ -85,6 +86,19 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     ...(webResult ?? []),
   ];
 
+  // Group comparables by configuration match
+  const configResult = groupComparablesByConfig(
+    realComparables,
+    lookupInput.itemName,
+    item.notes,
+    lookupInput.category,
+  );
+
+  // Use best-matching cluster for cross-validation instead of all comps
+  const pricingComps = configResult.bestCluster.length > 0
+    ? configResult.bestCluster
+    : realComparables;
+
   // Determine if we have enough evidence to provide pricing
   const hasAI = aiResult != null;
   const hasRealComps = realComparables.length > 0;
@@ -123,19 +137,24 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
       result.confidence = Math.min(0.95, result.confidence + 0.1);
     }
 
-    // Cross-validate with eBay if we have enough comps
-    if (realComparables.length >= 3) {
-      const ebayPrices = realComparables.map(c => c.price).sort((a, b) => a - b);
-      const ebayMedian = ebayPrices[Math.floor(ebayPrices.length / 2)];
-      const ratio = result.fairMarket / ebayMedian;
+    // Cross-validate with comparable data if we have enough config-matched comps
+    if (pricingComps.length >= 3) {
+      const compPrices = pricingComps.map(c => c.price).sort((a, b) => a - b);
+      const compMedian = compPrices[Math.floor(compPrices.length / 2)];
+      const ratio = result.fairMarket / compMedian;
       if (ratio < 0.5 || ratio > 2.0) {
-        // AI price wildly off from eBay data — adjust toward eBay
-        result.fastSale = Math.round(ebayMedian * 0.7);
-        result.fairMarket = Math.round(ebayMedian * 0.9);
-        result.reach = Math.round(ebayMedian * 1.15);
+        // AI price wildly off from comparable data — adjust toward comps
+        result.fastSale = Math.round(compMedian * 0.7);
+        result.fairMarket = Math.round(compMedian * 0.9);
+        result.reach = Math.round(compMedian * 1.15);
         result.confidence = Math.min(result.confidence, 0.5);
         result.reasoning += " [Price adjusted: AI estimate diverged significantly from eBay comparable data]";
       }
+    }
+
+    // Append config adjustment note if present
+    if (configResult.adjustmentNote) {
+      result.reasoning += ` [${configResult.adjustmentNote}]`;
     }
 
     // Cap pricing confidence by identification confidence
@@ -143,22 +162,27 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
       result.confidence = Math.min(result.confidence, item.identificationConfidence + 0.2);
     }
   } else {
-    // No AI, but we have eBay comparables — derive pricing purely from comps
-    const ebayPrices = realComparables.map(c => c.price).sort((a, b) => a - b);
-    const ebayMedian = ebayPrices[Math.floor(ebayPrices.length / 2)];
-    const lowest = ebayPrices[0];
-    const highest = ebayPrices[ebayPrices.length - 1];
+    // No AI, but we have comparables — derive pricing purely from config-matched comps
+    const compPrices = pricingComps.map(c => c.price).sort((a, b) => a - b);
+    const compMedian = compPrices[Math.floor(compPrices.length / 2)];
+    const lowest = compPrices[0];
+    const highest = compPrices[compPrices.length - 1];
 
     result = {
       fastSale: Math.round(lowest * 0.85),
-      fairMarket: Math.round(ebayMedian),
+      fairMarket: Math.round(compMedian),
       reach: Math.round(highest * 1.05),
-      confidence: realComparables.length >= 3 ? 0.6 : 0.4,
-      reasoning: `Pricing derived from ${realComparables.length} eBay comparable listing${realComparables.length > 1 ? "s" : ""}. No AI analysis was available.`,
-      suggestedChannel: ebayMedian > 200 ? "Facebook Marketplace" : ebayMedian > 50 ? "Facebook Marketplace or OfferUp" : "Base Yard Sale or Nextdoor",
-      saleSpeedBand: ebayMedian < 30 ? "FAST" : ebayMedian < 300 ? "MODERATE" : "SLOW",
+      confidence: pricingComps.length >= 3 ? 0.6 : 0.4,
+      reasoning: `Pricing derived from ${pricingComps.length} comparable listing${pricingComps.length > 1 ? "s" : ""}. No AI analysis was available.`,
+      suggestedChannel: compMedian > 200 ? "Facebook Marketplace" : compMedian > 50 ? "Facebook Marketplace or OfferUp" : "Base Yard Sale or Nextdoor",
+      saleSpeedBand: compMedian < 30 ? "FAST" : compMedian < 300 ? "MODERATE" : "SLOW",
       comparables: [], // we only use realComparables below
     };
+
+    // Append config adjustment note if present
+    if (configResult.adjustmentNote) {
+      result.reasoning += ` [${configResult.adjustmentNote}]`;
+    }
 
     // Apply model guardrails
     const norm = normalizeModel(lookupInput.itemName, lookupInput.brand, lookupInput.model, lookupInput.category);
@@ -170,7 +194,7 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     }
   }
 
-  // Only save real comparables (eBay)
+  // Save ALL real comparables to the database (not just the best cluster)
   result.comparables = realComparables;
 
   const now = new Date().toISOString();

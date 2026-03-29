@@ -163,6 +163,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ answers }),
     }),
+
+  parseVoiceTranscript: (transcript: string, roomType?: string) =>
+    request<{
+      itemName: string;
+      category: string;
+      condition: string;
+      sizeClass: string;
+      notes: string;
+      willingToSell: boolean;
+      keepFlag: boolean;
+      sentimentalFlag: boolean;
+    }>("/items/parse-voice", {
+      method: "POST",
+      body: JSON.stringify({ transcript, roomType }),
+    }),
 };
 
 export interface ProviderTestResult {

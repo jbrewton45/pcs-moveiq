@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Item, ItemCondition, ItemStatus, SizeClass, Recommendation, Comparable, ComparableSource, ClarificationQuestion } from "../types";
 import { api } from "../api";
+import { VoiceCapture } from "./VoiceCapture";
 
 function label(s: string) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -697,6 +698,9 @@ export function RoomDetailView({
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // Voice capture toggle
+  const [showVoiceCapture, setShowVoiceCapture] = useState(false);
+
   // Add item form state
   const [itemName, setItemName] = useState("");
   const [category, setCategory] = useState("");
@@ -938,7 +942,29 @@ export function RoomDetailView({
       </section>
 
       <section>
-        <h3 className="section-heading">Add an Item</h3>
+        <div className="section-heading-row">
+          <h3 className="section-heading">Add an Item</h3>
+          <button
+            className="voice-capture-btn"
+            type="button"
+            onClick={() => setShowVoiceCapture((v) => !v)}
+          >
+            {showVoiceCapture ? "Type Instead" : "🎤 Speak"}
+          </button>
+        </div>
+
+        {showVoiceCapture ? (
+          <VoiceCapture
+            projectId={projectId}
+            roomId={roomId}
+            roomType={roomType}
+            onItemCreated={() => {
+              setRefreshKey((k) => k + 1);
+              setShowVoiceCapture(false);
+            }}
+            onCancel={() => setShowVoiceCapture(false)}
+          />
+        ) : (
         <form className="project-form" onSubmit={handleAddItem}>
           {formError && <p className="form-error">{formError}</p>}
 
@@ -1059,6 +1085,7 @@ export function RoomDetailView({
             {submitting ? "Adding..." : "Add Item"}
           </button>
         </form>
+        )}
       </section>
 
       {showBulkBar && (

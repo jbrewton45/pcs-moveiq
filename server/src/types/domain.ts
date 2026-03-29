@@ -1,5 +1,7 @@
 export type MoveType = "CONUS" | "OCONUS" | "JAPAN" | "EUROPE" | "STORAGE_ONLY";
 
+export type ConfigTier = "base" | "base_plus" | "bundle" | "full_kit";
+
 export type IdentificationStatus = "NONE" | "SUGGESTED" | "CONFIRMED" | "EDITED";
 
 export type HousingAssumption = "SMALLER" | "SAME" | "LARGER" | "UNKNOWN";
