@@ -39,14 +39,14 @@ export async function postLogin(req: Request, res: Response): Promise<void> {
   }
 }
 
-export function getMe(req: Request, res: Response): void {
-  const user = getUserById(req.userId!);
+export async function getMe(req: Request, res: Response): Promise<void> {
+  const user = await getUserById(req.userId!);
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
   res.json(toPublic(user));
 }
 
-export function putMe(req: Request, res: Response): void {
-  const updated = updateUser(req.userId!, req.body);
+export async function putMe(req: Request, res: Response): Promise<void> {
+  const updated = await updateUser(req.userId!, req.body);
   if (!updated) { res.status(404).json({ error: "User not found" }); return; }
   res.json(updated);
 }

@@ -9,7 +9,7 @@ declare global {
   }
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) {
     res.status(401).json({ error: "Authentication required" });
@@ -23,7 +23,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
 
-  const user = getUserById(payload.userId);
+  const user = await getUserById(payload.userId);
   if (!user) {
     res.status(401).json({ error: "User not found" });
     return;

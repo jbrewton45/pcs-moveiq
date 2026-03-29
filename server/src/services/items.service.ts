@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
-import { db } from "../data/database.js";
-import type { Item, ItemCondition, ItemStatus, Recommendation, RecommendationResult, PricingContext, SizeClass } from "../types/domain.js";
+import { query } from "../data/database.js";
+import type { Item, ItemCondition, ItemStatus, RecommendationResult, PricingContext, SizeClass } from "../types/domain.js";
 import type { MoveType, HousingAssumption } from "../types/domain.js";
 import { createId } from "../utils/id.js";
 import { rowToItem } from "../utils/converters.js";
@@ -32,14 +32,10 @@ interface UpdateItemInput {
   willingToSell?: boolean;
 }
 
-
 function getConfidenceTier(confidence: number | undefined, hasEbay: boolean): "HIGH" | "MEDIUM" | "LOW" {
   let tier: "HIGH" | "MEDIUM" | "LOW" =
     (confidence ?? 0) >= 0.6 ? "HIGH" :
     (confidence ?? 0) >= 0.4 ? "MEDIUM" : "LOW";
-  // TODO: The eBay bump below assumes any eBay comparables validate the AI price.
-  // In future, this should only apply when the eBay median is within a reasonable
-  // range of the AI-derived fairMarket price (e.g. within 50%), not unconditionally.
   if (hasEbay && tier === "LOW") tier = "MEDIUM";
   else if (hasEbay && tier === "MEDIUM") tier = "HIGH";
   return tier;
@@ -51,12 +47,9 @@ function deriveRecommendation(
   housingAssumption: HousingAssumption,
   pricingContext?: PricingContext,
 ): RecommendationResult {
-  // 1. Explicit keep
   if (input.keepFlag || input.sentimentalFlag) {
     return { recommendation: "KEEP", reason: input.sentimentalFlag ? "Sentimental item — keep" : "Marked as keep" };
   }
-
-  // 2. Poor condition → discard
   if (input.condition === "POOR") {
     return { recommendation: "DISCARD", reason: "Poor condition — not worth moving" };
   }
@@ -65,14 +58,11 @@ function deriveRecommendation(
   const isSmallerHousing = housingAssumption === "SMALLER";
   const isLarge = input.sizeClass === "LARGE" || input.sizeClass === "OVERSIZED";
 
-  // 3. Willing to sell — pricing-informed when data exists
   if (input.willingToSell) {
     const hasPricing = pricingContext?.priceFairMarket != null && pricingContext?.pricingConfidence != null;
-
     if (hasPricing) {
       const tier = getConfidenceTier(pricingContext!.pricingConfidence, !!pricingContext!.hasEbayComparables);
       const fmv = pricingContext!.priceFairMarket!;
-
       if (tier === "HIGH" && fmv >= 50 && (isLarge || isOconus)) {
         return { recommendation: "SELL_NOW", reason: "High-value item — sell before PCS" };
       }
@@ -83,66 +73,63 @@ function deriveRecommendation(
         return { recommendation: "SELL_SOON", reason: "Low pricing confidence — take time to sell" };
       }
     }
-
-    // Fall through to original logic
     if (isLarge || isOconus) {
       return { recommendation: "SELL_NOW", reason: isOconus ? "OCONUS move — sell before PCS to avoid shipping costs" : "Large item — sell to reduce shipment weight" };
     }
     return { recommendation: "SELL_SOON", reason: "Willing to sell — list when ready" };
   }
 
-  // 4. Not for sale
   if (!isLarge) {
     return { recommendation: "SHIP", reason: "Small enough to ship" };
   }
-
   if (isSmallerHousing || isOconus) {
     return { recommendation: "STORE", reason: isSmallerHousing ? "Downsizing — store until next move" : "OCONUS — store oversized items" };
   }
   return { recommendation: "SHIP", reason: "Ship to destination" };
 }
 
-export function listItemsByProject(projectId: string): Item[] {
-  const rows = db.prepare("SELECT * FROM items WHERE projectId = ? ORDER BY createdAt ASC").all(projectId);
-  return rows.map(r => rowToItem(r as Record<string, unknown>));
+export async function listItemsByProject(projectId: string): Promise<Item[]> {
+  const result = await query('SELECT * FROM items WHERE "projectId" = $1 ORDER BY "createdAt" ASC', [projectId]);
+  return result.rows.map(r => rowToItem(r as Record<string, unknown>));
 }
 
-export function listItemsByRoom(roomId: string): Item[] {
-  const rows = db.prepare("SELECT * FROM items WHERE roomId = ? ORDER BY createdAt ASC").all(roomId);
-  return rows.map(r => rowToItem(r as Record<string, unknown>));
+export async function listItemsByRoom(roomId: string): Promise<Item[]> {
+  const result = await query('SELECT * FROM items WHERE "roomId" = $1 ORDER BY "createdAt" ASC', [roomId]);
+  return result.rows.map(r => rowToItem(r as Record<string, unknown>));
 }
 
-function getItemById(id: string): Item | undefined {
-  const row = db.prepare("SELECT * FROM items WHERE id = ?").get(id);
-  return row ? rowToItem(row as Record<string, unknown>) : undefined;
+async function getItemById(id: string): Promise<Item | undefined> {
+  const result = await query('SELECT * FROM items WHERE id = $1', [id]);
+  return result.rows.length > 0 ? rowToItem(result.rows[0] as Record<string, unknown>) : undefined;
 }
 
-export function createItem(input: CreateItemInput): Item {
-  // Look up project for recommendation context
-  const project = db.prepare("SELECT moveType, housingAssumption FROM projects WHERE id = ?").get(input.projectId) as { moveType: MoveType; housingAssumption: HousingAssumption } | undefined;
-  if (!project) throw new Error("Project not found");
+export async function createItem(input: CreateItemInput): Promise<Item> {
+  const projectResult = await query('SELECT "moveType", "housingAssumption" FROM projects WHERE id = $1', [input.projectId]);
+  if (projectResult.rows.length === 0) throw new Error("Project not found");
 
+  const project = projectResult.rows[0] as { moveType: MoveType; housingAssumption: HousingAssumption };
   const now = new Date().toISOString();
   const id = createId("item");
   const { recommendation, reason } = deriveRecommendation(input, project.moveType, project.housingAssumption);
 
-  db.prepare(`
-    INSERT INTO items (id, projectId, roomId, itemName, category, condition, sizeClass,
-      notes, weightLbs, sentimentalFlag, keepFlag, willingToSell, recommendation, recommendationReason, status, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id, input.projectId, input.roomId, input.itemName, input.category,
-    input.condition, input.sizeClass, input.notes ?? null,
-    input.weightLbs ?? null,
-    input.sentimentalFlag ? 1 : 0, input.keepFlag ? 1 : 0, input.willingToSell ? 1 : 0,
-    recommendation, reason, "UNREVIEWED", now, now
+  await query(
+    `INSERT INTO items (id, "projectId", "roomId", "itemName", category, condition, "sizeClass",
+      notes, "weightLbs", "sentimentalFlag", "keepFlag", "willingToSell", recommendation, "recommendationReason", status, "createdAt", "updatedAt")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+    [
+      id, input.projectId, input.roomId, input.itemName, input.category,
+      input.condition, input.sizeClass, input.notes ?? null,
+      input.weightLbs ?? null,
+      input.sentimentalFlag, input.keepFlag, input.willingToSell,
+      recommendation, reason, "UNREVIEWED", now, now
+    ]
   );
 
-  return getItemById(id)!;
+  return (await getItemById(id))!;
 }
 
-export function updateItem(id: string, input: UpdateItemInput): Item | null {
-  const existing = getItemById(id);
+export async function updateItem(id: string, input: UpdateItemInput): Promise<Item | null> {
+  const existing = await getItemById(id);
   if (!existing) return null;
 
   const merged = {
@@ -157,16 +144,15 @@ export function updateItem(id: string, input: UpdateItemInput): Item | null {
     willingToSell: input.willingToSell ?? existing.willingToSell,
   };
 
-  // Re-derive recommendation with project context + existing pricing data
-  const project = db.prepare("SELECT moveType, housingAssumption FROM projects WHERE id = ?").get(existing.projectId) as { moveType: MoveType; housingAssumption: HousingAssumption } | undefined;
-
+  const projectResult = await query('SELECT "moveType", "housingAssumption" FROM projects WHERE id = $1', [existing.projectId]);
   let recommendation = existing.recommendation;
   let reason = existing.recommendationReason ?? "";
-  if (project) {
+  if (projectResult.rows.length > 0) {
+    const project = projectResult.rows[0] as { moveType: MoveType; housingAssumption: HousingAssumption };
     const pricingCtx: PricingContext | undefined = existing.priceFairMarket != null ? {
       priceFairMarket: existing.priceFairMarket,
       pricingConfidence: existing.pricingConfidence,
-      hasEbayComparables: false, // not re-checking comps on edit
+      hasEbayComparables: false,
       identificationStatus: existing.identificationStatus,
     } : undefined;
     const result = deriveRecommendation(merged, project.moveType, project.housingAssumption, pricingCtx);
@@ -175,28 +161,26 @@ export function updateItem(id: string, input: UpdateItemInput): Item | null {
   }
 
   const now = new Date().toISOString();
-
-  db.prepare(`
-    UPDATE items SET itemName = ?, category = ?, condition = ?, sizeClass = ?,
-      notes = ?, weightLbs = ?, sentimentalFlag = ?, keepFlag = ?, willingToSell = ?,
-      recommendation = ?, recommendationReason = ?, updatedAt = ?
-    WHERE id = ?
-  `).run(
-    merged.itemName, merged.category, merged.condition, merged.sizeClass,
-    merged.notes ?? null, merged.weightLbs ?? null,
-    merged.sentimentalFlag ? 1 : 0,
-    merged.keepFlag ? 1 : 0, merged.willingToSell ? 1 : 0,
-    recommendation, reason, now, id
+  await query(
+    `UPDATE items SET "itemName" = $1, category = $2, condition = $3, "sizeClass" = $4,
+      notes = $5, "weightLbs" = $6, "sentimentalFlag" = $7, "keepFlag" = $8, "willingToSell" = $9,
+      recommendation = $10, "recommendationReason" = $11, "updatedAt" = $12
+     WHERE id = $13`,
+    [
+      merged.itemName, merged.category, merged.condition, merged.sizeClass,
+      merged.notes ?? null, merged.weightLbs ?? null,
+      merged.sentimentalFlag, merged.keepFlag, merged.willingToSell,
+      recommendation, reason, now, id
+    ]
   );
 
-  return getItemById(id)!;
+  return (await getItemById(id))!;
 }
 
-export function deleteItem(id: string): boolean {
-  const item = getItemById(id);
+export async function deleteItem(id: string): Promise<boolean> {
+  const item = await getItemById(id);
   if (!item) return false;
 
-  // Delete photo file if exists
   if (item.photoPath) {
     const filePath = path.join(process.cwd(), "uploads", item.photoPath);
     if (fs.existsSync(filePath)) {
@@ -204,45 +188,45 @@ export function deleteItem(id: string): boolean {
     }
   }
 
-  const result = db.prepare("DELETE FROM items WHERE id = ?").run(id);
-  return result.changes > 0;
+  const result = await query('DELETE FROM items WHERE id = $1', [id]);
+  return (result.rowCount ?? 0) > 0;
 }
 
-export function setItemPhoto(id: string, photoPath: string): Item | null {
-  const existing = getItemById(id);
+export async function setItemPhoto(id: string, photoPath: string): Promise<Item | null> {
+  const existing = await getItemById(id);
   if (!existing) return null;
   const now = new Date().toISOString();
-  db.prepare("UPDATE items SET photoPath = ?, updatedAt = ? WHERE id = ?").run(photoPath, now, id);
-  return getItemById(id)!;
+  await query('UPDATE items SET "photoPath" = $1, "updatedAt" = $2 WHERE id = $3', [photoPath, now, id]);
+  return (await getItemById(id))!;
 }
 
-export function removeItemPhoto(id: string): Item | null {
-  const existing = getItemById(id);
+export async function removeItemPhoto(id: string): Promise<Item | null> {
+  const existing = await getItemById(id);
   if (!existing) return null;
   const now = new Date().toISOString();
-  db.prepare("UPDATE items SET photoPath = NULL, updatedAt = ? WHERE id = ?").run(now, id);
-  return getItemById(id)!;
+  await query('UPDATE items SET "photoPath" = NULL, "updatedAt" = $1 WHERE id = $2', [now, id]);
+  return (await getItemById(id))!;
 }
 
-export function getItemPhoto(id: string): string | undefined {
-  const item = getItemById(id);
+export async function getItemPhoto(id: string): Promise<string | undefined> {
+  const item = await getItemById(id);
   return item?.photoPath;
 }
 
-export function getProjectSummary(projectId: string): Record<string, number> {
-  const rows = db.prepare(
-    "SELECT recommendation, COUNT(*) as count FROM items WHERE projectId = ? GROUP BY recommendation"
-  ).all(projectId) as { recommendation: string; count: number }[];
-
+export async function getProjectSummary(projectId: string): Promise<Record<string, number>> {
+  const result = await query(
+    'SELECT recommendation, COUNT(*) as count FROM items WHERE "projectId" = $1 GROUP BY recommendation',
+    [projectId]
+  );
   const summary: Record<string, number> = {};
-  for (const row of rows) {
-    summary[row.recommendation] = row.count;
+  for (const row of result.rows as { recommendation: string; count: string }[]) {
+    summary[row.recommendation] = Number(row.count);
   }
   return summary;
 }
 
-export function getPackingList(projectId: string): { recommendation: string; items: Item[] }[] {
-  const items = listItemsByProject(projectId);
+export async function getPackingList(projectId: string): Promise<{ recommendation: string; items: Item[] }[]> {
+  const items = await listItemsByProject(projectId);
   const groups: Record<string, Item[]> = {};
   for (const item of items) {
     if (!groups[item.recommendation]) groups[item.recommendation] = [];
@@ -252,69 +236,83 @@ export function getPackingList(projectId: string): { recommendation: string; ite
   return order.filter(r => groups[r]).map(r => ({ recommendation: r, items: groups[r] }));
 }
 
-export function bulkUpdateStatus(itemIds: string[], status: ItemStatus): number {
+export async function bulkUpdateStatus(itemIds: string[], status: ItemStatus): Promise<number> {
+  if (itemIds.length === 0) return 0;
   const now = new Date().toISOString();
-  const placeholders = itemIds.map(() => "?").join(",");
-  const result = db.prepare(
-    `UPDATE items SET status = ?, updatedAt = ? WHERE id IN (${placeholders})`
-  ).run(status, now, ...itemIds);
-  return result.changes;
+  const result = await query(
+    'UPDATE items SET status = $1, "updatedAt" = $2 WHERE id = ANY($3)',
+    [status, now, itemIds]
+  );
+  return result.rowCount ?? 0;
 }
 
-export function bulkDeleteItems(itemIds: string[]): number {
-  const placeholders = itemIds.map(() => "?").join(",");
-  const result = db.prepare(
-    `DELETE FROM items WHERE id IN (${placeholders})`
-  ).run(...itemIds);
-  return result.changes;
+export async function bulkDeleteItems(itemIds: string[]): Promise<number> {
+  if (itemIds.length === 0) return 0;
+  const result = await query('DELETE FROM items WHERE id = ANY($1)', [itemIds]);
+  return result.rowCount ?? 0;
 }
 
-export function getProjectWeightSummary(projectId: string): {
+export async function getProjectWeightSummary(projectId: string): Promise<{
   totalWeight: number;
   roomWeights: Record<string, number>;
   itemsWithWeight: number;
   itemsWithoutWeight: number;
-} {
-  const totalRow = db.prepare(
-    "SELECT COALESCE(SUM(weightLbs), 0) as total FROM items WHERE projectId = ? AND weightLbs IS NOT NULL"
-  ).get(projectId) as { total: number };
+}> {
+  const totalResult = await query(
+    'SELECT COALESCE(SUM("weightLbs"), 0) as total FROM items WHERE "projectId" = $1 AND "weightLbs" IS NOT NULL',
+    [projectId]
+  );
+  const countResult = await query(
+    `SELECT
+      COUNT(CASE WHEN "weightLbs" IS NOT NULL THEN 1 END) as "withWeight",
+      COUNT(CASE WHEN "weightLbs" IS NULL THEN 1 END) as "withoutWeight"
+     FROM items WHERE "projectId" = $1`,
+    [projectId]
+  );
+  const roomResult = await query(
+    `SELECT "roomId", COALESCE(SUM("weightLbs"), 0) as total
+     FROM items WHERE "projectId" = $1 AND "weightLbs" IS NOT NULL
+     GROUP BY "roomId"`,
+    [projectId]
+  );
 
-  const countRows = db.prepare(
-    "SELECT COUNT(CASE WHEN weightLbs IS NOT NULL THEN 1 END) as withWeight, COUNT(CASE WHEN weightLbs IS NULL THEN 1 END) as withoutWeight FROM items WHERE projectId = ?"
-  ).get(projectId) as { withWeight: number; withoutWeight: number };
-
-  const roomRows = db.prepare(
-    "SELECT roomId, COALESCE(SUM(weightLbs), 0) as total FROM items WHERE projectId = ? AND weightLbs IS NOT NULL GROUP BY roomId"
-  ).all(projectId) as { roomId: string; total: number }[];
-
+  const totalRow = totalResult.rows[0] as { total: string };
+  const countRow = countResult.rows[0] as { withWeight: string; withoutWeight: string };
   const roomWeights: Record<string, number> = {};
-  for (const row of roomRows) {
-    roomWeights[row.roomId] = row.total;
+  for (const row of roomResult.rows as { roomId: string; total: string }[]) {
+    roomWeights[row.roomId] = Number(row.total);
   }
 
   return {
-    totalWeight: totalRow.total,
+    totalWeight: Number(totalRow.total),
     roomWeights,
-    itemsWithWeight: countRows.withWeight,
-    itemsWithoutWeight: countRows.withoutWeight,
+    itemsWithWeight: Number(countRow.withWeight),
+    itemsWithoutWeight: Number(countRow.withoutWeight),
   };
 }
 
-export function rederiveRecommendation(itemId: string): Item | null {
-  const row = db.prepare("SELECT * FROM items WHERE id = ?").get(itemId);
-  if (!row) return null;
+export async function rederiveRecommendation(itemId: string): Promise<Item | null> {
+  const result = await query('SELECT * FROM items WHERE id = $1', [itemId]);
+  if (result.rows.length === 0) return null;
 
-  const item = rowToItem(row as Record<string, unknown>);
-  const project = db.prepare("SELECT moveType, housingAssumption FROM projects WHERE id = ?").get(item.projectId) as { moveType: MoveType; housingAssumption: HousingAssumption } | undefined;
-  if (!project) return item;
+  const item = rowToItem(result.rows[0] as Record<string, unknown>);
+  const projectResult = await query(
+    'SELECT "moveType", "housingAssumption" FROM projects WHERE id = $1',
+    [item.projectId]
+  );
+  if (projectResult.rows.length === 0) return item;
 
-  // Check for eBay comparables
-  const ebayCount = db.prepare("SELECT COUNT(*) as cnt FROM comparables WHERE itemId = ? AND source = 'ebay'").get(itemId) as { cnt: number };
+  const project = projectResult.rows[0] as { moveType: MoveType; housingAssumption: HousingAssumption };
+  const ebayResult = await query(
+    "SELECT COUNT(*) as cnt FROM comparables WHERE \"itemId\" = $1 AND source = 'ebay'",
+    [itemId]
+  );
+  const ebayCount = Number((ebayResult.rows[0] as { cnt: string }).cnt);
 
   const pricingCtx: PricingContext | undefined = item.priceFairMarket != null ? {
     priceFairMarket: item.priceFairMarket,
     pricingConfidence: item.pricingConfidence,
-    hasEbayComparables: ebayCount.cnt > 0,
+    hasEbayComparables: ebayCount > 0,
     identificationStatus: item.identificationStatus,
   } : undefined;
 
@@ -324,10 +322,23 @@ export function rederiveRecommendation(itemId: string): Item | null {
 
   if (recommendation !== item.recommendation || reason !== item.recommendationReason) {
     const now = new Date().toISOString();
-    db.prepare("UPDATE items SET recommendation = ?, recommendationReason = ?, updatedAt = ? WHERE id = ?")
-      .run(recommendation, reason, now, itemId);
+    await query(
+      'UPDATE items SET recommendation = $1, "recommendationReason" = $2, "updatedAt" = $3 WHERE id = $4',
+      [recommendation, reason, now, itemId]
+    );
   }
 
-  const updated = db.prepare("SELECT * FROM items WHERE id = ?").get(itemId);
-  return updated ? rowToItem(updated as Record<string, unknown>) : null;
+  const updated = await query('SELECT * FROM items WHERE id = $1', [itemId]);
+  return updated.rows.length > 0 ? rowToItem(updated.rows[0] as Record<string, unknown>) : null;
+}
+
+export async function submitClarifications(itemId: string, answers: Record<string, string>): Promise<Item | null> {
+  const existing = await getItemById(itemId);
+  if (!existing) return null;
+  const now = new Date().toISOString();
+  await query(
+    `UPDATE items SET "clarificationAnswers" = $1, "pendingClarifications" = NULL, "updatedAt" = $2 WHERE id = $3`,
+    [JSON.stringify(answers), now, itemId]
+  );
+  return (await getItemById(itemId))!;
 }

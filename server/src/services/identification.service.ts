@@ -1,4 +1,4 @@
-import { db } from "../data/database.js";
+import { query } from "../data/database.js";
 import type { Item } from "../types/domain.js";
 import { rowToItem } from "../utils/converters.js";
 import { claudeIdentify, isClaudeAvailable } from "../providers/claude.provider.js";
@@ -15,8 +15,6 @@ interface IdentificationResult {
   clarifications?: import("../types/domain.js").ClarificationQuestion[];
 }
 
-// Mock provider — returns unverified suggestions based on existing item data only.
-// Used only when no AI provider is configured or as a last-resort fallback.
 function mockIdentify(item: Item): IdentificationResult {
   const categoryMap: Record<string, { brand?: string; model?: string; confidence: number }> = {
     "Furniture": { brand: undefined, model: undefined, confidence: 0.3 },
@@ -30,7 +28,6 @@ function mockIdentify(item: Item): IdentificationResult {
 
   const catInfo = categoryMap[item.category] ?? { confidence: 0.2 };
   const hasPhoto = !!item.photoPath;
-  // Modest boost for having a photo, but cap well below AI-level confidence
   const confidenceBoost = hasPhoto ? 0.05 : 0;
 
   return {
@@ -46,15 +43,13 @@ function mockIdentify(item: Item): IdentificationResult {
 }
 
 export async function identifyItem(itemId: string): Promise<Item | null> {
-  const row = db.prepare("SELECT * FROM items WHERE id = ?").get(itemId);
-  if (!row) return null;
+  const result = await query('SELECT * FROM items WHERE id = $1', [itemId]);
+  if (result.rows.length === 0) return null;
 
-  const currentItem = rowToItem(row as Record<string, unknown>);
-
-  let result: IdentificationResult;
+  const currentItem = rowToItem(result.rows[0] as Record<string, unknown>);
+  let identResult: IdentificationResult;
 
   if (isClaudeAvailable()) {
-    // 1. Try Claude first
     const claudeResult = await claudeIdentify({
       itemName: currentItem.itemName,
       category: currentItem.category,
@@ -65,9 +60,8 @@ export async function identifyItem(itemId: string): Promise<Item | null> {
     });
 
     if (claudeResult) {
-      result = claudeResult as IdentificationResult;
+      identResult = claudeResult as IdentificationResult;
     } else if (isOpenAIAvailable()) {
-      // 2. Claude failed — fall back to OpenAI
       const openaiResult = await openaiIdentify({
         itemName: currentItem.itemName,
         category: currentItem.category,
@@ -76,21 +70,18 @@ export async function identifyItem(itemId: string): Promise<Item | null> {
         photoPath: currentItem.photoPath,
         notes: currentItem.notes,
       });
-
       if (openaiResult) {
-        result = openaiResult as IdentificationResult;
-        result.reasoning = "[OpenAI] " + result.reasoning;
+        identResult = openaiResult as IdentificationResult;
+        identResult.reasoning = "[OpenAI] " + identResult.reasoning;
       } else {
-        result = mockIdentify(currentItem);
-        result.reasoning = "[Fallback] " + result.reasoning;
+        identResult = mockIdentify(currentItem);
+        identResult.reasoning = "[Fallback] " + identResult.reasoning;
       }
     } else {
-      // Claude failed, no OpenAI — use mock
-      result = mockIdentify(currentItem);
-      result.reasoning = "[Fallback] " + result.reasoning;
+      identResult = mockIdentify(currentItem);
+      identResult.reasoning = "[Fallback] " + identResult.reasoning;
     }
   } else if (isOpenAIAvailable()) {
-    // 2. Claude not configured — try OpenAI
     const openaiResult = await openaiIdentify({
       itemName: currentItem.itemName,
       category: currentItem.category,
@@ -99,90 +90,89 @@ export async function identifyItem(itemId: string): Promise<Item | null> {
       photoPath: currentItem.photoPath,
       notes: currentItem.notes,
     });
-
     if (openaiResult) {
-      result = openaiResult as IdentificationResult;
-      result.reasoning = "[OpenAI] " + result.reasoning;
+      identResult = openaiResult as IdentificationResult;
+      identResult.reasoning = "[OpenAI] " + identResult.reasoning;
     } else {
-      result = mockIdentify(currentItem);
-      result.reasoning = "[Fallback] " + result.reasoning;
+      identResult = mockIdentify(currentItem);
+      identResult.reasoning = "[Fallback] " + identResult.reasoning;
     }
   } else {
-    // 3. Neither Claude nor OpenAI available — use mock
-    result = mockIdentify(currentItem);
-    result.reasoning = "[Mock] " + result.reasoning;
+    identResult = mockIdentify(currentItem);
+    identResult.reasoning = "[Mock] " + identResult.reasoning;
   }
 
   const now = new Date().toISOString();
-
-  // Serialize clarifications to JSON if present and non-empty
   const pendingClarificationsJson =
-    result.clarifications && result.clarifications.length > 0
-      ? JSON.stringify(result.clarifications)
+    identResult.clarifications && identResult.clarifications.length > 0
+      ? JSON.stringify(identResult.clarifications)
       : null;
 
-  db.prepare(`
-    UPDATE items SET
-      identifiedName = ?, identifiedCategory = ?, identifiedBrand = ?, identifiedModel = ?,
-      identificationConfidence = ?, identificationReasoning = ?, identificationStatus = ?,
-      pendingClarifications = ?,
-      updatedAt = ?
-    WHERE id = ?
-  `).run(
-    result.identifiedName,
-    result.identifiedCategory,
-    result.identifiedBrand ?? null,
-    result.identifiedModel ?? null,
-    result.confidence,
-    result.reasoning,
-    "SUGGESTED",
-    pendingClarificationsJson,
-    now,
-    itemId,
+  await query(
+    `UPDATE items SET
+      "identifiedName" = $1, "identifiedCategory" = $2, "identifiedBrand" = $3, "identifiedModel" = $4,
+      "identificationConfidence" = $5, "identificationReasoning" = $6, "identificationStatus" = $7,
+      "pendingClarifications" = $8, "updatedAt" = $9
+     WHERE id = $10`,
+    [
+      identResult.identifiedName,
+      identResult.identifiedCategory,
+      identResult.identifiedBrand ?? null,
+      identResult.identifiedModel ?? null,
+      identResult.confidence,
+      identResult.reasoning,
+      "SUGGESTED",
+      pendingClarificationsJson,
+      now,
+      itemId,
+    ]
   );
 
-  const updated = db.prepare("SELECT * FROM items WHERE id = ?").get(itemId);
-  if (!updated) return null;
-  return rowToItem(updated as Record<string, unknown>);
+  const updated = await query('SELECT * FROM items WHERE id = $1', [itemId]);
+  if (updated.rows.length === 0) return null;
+  return rowToItem(updated.rows[0] as Record<string, unknown>);
 }
 
-export function confirmIdentification(itemId: string, edits?: {
+export async function confirmIdentification(itemId: string, edits?: {
   identifiedName?: string;
   identifiedCategory?: string;
   identifiedBrand?: string;
   identifiedModel?: string;
-}): Item | null {
-  const row = db.prepare("SELECT * FROM items WHERE id = ?").get(itemId);
-  if (!row) return null;
+}): Promise<Item | null> {
+  const result = await query('SELECT * FROM items WHERE id = $1', [itemId]);
+  if (result.rows.length === 0) return null;
 
   const now = new Date().toISOString();
   const status = edits ? "EDITED" : "CONFIRMED";
+  const r = result.rows[0] as Record<string, unknown>;
 
   if (edits) {
-    const r = row as Record<string, unknown>;
-    db.prepare(`
-      UPDATE items SET
-        identifiedName = COALESCE(?, identifiedName),
-        identifiedCategory = COALESCE(?, identifiedCategory),
-        identifiedBrand = ?,
-        identifiedModel = ?,
-        identificationStatus = ?,
-        updatedAt = ?
-      WHERE id = ?
-    `).run(
-      edits.identifiedName ?? (r.identifiedName as string | null) ?? null,
-      edits.identifiedCategory ?? (r.identifiedCategory as string | null) ?? null,
-      edits.identifiedBrand ?? (r.identifiedBrand as string | null) ?? null,
-      edits.identifiedModel ?? (r.identifiedModel as string | null) ?? null,
-      status,
-      now,
-      itemId,
+    await query(
+      `UPDATE items SET
+        "identifiedName" = COALESCE($1, "identifiedName"),
+        "identifiedCategory" = COALESCE($2, "identifiedCategory"),
+        "identifiedBrand" = $3,
+        "identifiedModel" = $4,
+        "identificationStatus" = $5,
+        "updatedAt" = $6
+       WHERE id = $7`,
+      [
+        edits.identifiedName ?? (r.identifiedName as string | null) ?? null,
+        edits.identifiedCategory ?? (r.identifiedCategory as string | null) ?? null,
+        edits.identifiedBrand ?? (r.identifiedBrand as string | null) ?? null,
+        edits.identifiedModel ?? (r.identifiedModel as string | null) ?? null,
+        status,
+        now,
+        itemId,
+      ]
     );
   } else {
-    db.prepare("UPDATE items SET identificationStatus = ?, updatedAt = ? WHERE id = ?")
-      .run(status, now, itemId);
+    await query(
+      'UPDATE items SET "identificationStatus" = $1, "updatedAt" = $2 WHERE id = $3',
+      [status, now, itemId]
+    );
   }
 
-  const updated = db.prepare("SELECT * FROM items WHERE id = ?").get(itemId);
-  return updated ? rowToItem(updated as Record<string, unknown>) : null;
+  const updated = await query('SELECT * FROM items WHERE id = $1', [itemId]);
+  return updated.rows.length > 0 ? rowToItem(updated.rows[0] as Record<string, unknown>) : null;
 }

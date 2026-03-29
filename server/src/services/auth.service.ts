@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { db } from "../data/database.js";
+import { query } from "../data/database.js";
 import type { User, UserPublic } from "../types/domain.js";
 import { createId } from "../utils/id.js";
 
@@ -23,70 +23,72 @@ export function toPublic(user: User): UserPublic {
 }
 
 export async function signup(email: string, password: string, displayName: string): Promise<{ user: UserPublic; token: string }> {
-  const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
-  if (existing) throw new Error("Email already registered");
+  const existing = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+  if (existing.rows.length > 0) throw new Error("Email already registered");
 
   const passwordHash = await bcrypt.hash(password, 12);
   const now = new Date().toISOString();
   const id = createId("user");
 
-  db.prepare(`
-    INSERT INTO users (id, email, passwordHash, displayName, createdAt, updatedAt, lastLoginAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, email.toLowerCase().trim(), passwordHash, displayName.trim(), now, now, now);
+  await query(
+    `INSERT INTO users (id, email, "passwordHash", "displayName", "createdAt", "updatedAt", "lastLoginAt")
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [id, email.toLowerCase().trim(), passwordHash, displayName.trim(), now, now, now]
+  );
 
-  const user = getUserById(id)!;
-  const token = generateToken(user.id);
-  return { user: toPublic(user), token };
+  const user = await getUserById(id);
+  const token = generateToken(user!.id);
+  return { user: toPublic(user!), token };
 }
 
 export async function login(email: string, password: string): Promise<{ user: UserPublic; token: string }> {
-  const row = db.prepare("SELECT * FROM users WHERE email = ?").get(email.toLowerCase().trim());
-  if (!row) throw new Error("Invalid email or password");
+  const result = await query('SELECT * FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+  if (result.rows.length === 0) throw new Error("Invalid email or password");
 
-  const user = rowToUser(row as Record<string, unknown>);
+  const user = rowToUser(result.rows[0] as Record<string, unknown>);
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) throw new Error("Invalid email or password");
 
   const now = new Date().toISOString();
-  db.prepare("UPDATE users SET lastLoginAt = ? WHERE id = ?").run(now, user.id);
+  await query('UPDATE users SET "lastLoginAt" = $1 WHERE id = $2', [now, user.id]);
 
   const token = generateToken(user.id);
   return { user: toPublic({ ...user, lastLoginAt: now }), token };
 }
 
-export function getUserById(id: string): User | undefined {
-  const row = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
-  return row ? rowToUser(row as Record<string, unknown>) : undefined;
+export async function getUserById(id: string): Promise<User | undefined> {
+  const result = await query('SELECT * FROM users WHERE id = $1', [id]);
+  return result.rows.length > 0 ? rowToUser(result.rows[0] as Record<string, unknown>) : undefined;
 }
 
-export function updateUser(id: string, data: {
+export async function updateUser(id: string, data: {
   displayName?: string;
   branchOfService?: string | null;
   dutyStation?: string | null;
   preferredMarketplace?: string | null;
-}): UserPublic | null {
-  const user = getUserById(id);
+}): Promise<UserPublic | null> {
+  const user = await getUserById(id);
   if (!user) return null;
 
   const now = new Date().toISOString();
-  db.prepare(`
-    UPDATE users SET
-      displayName = COALESCE(?, displayName),
-      branchOfService = ?,
-      dutyStation = ?,
-      preferredMarketplace = ?,
-      updatedAt = ?
-    WHERE id = ?
-  `).run(
-    data.displayName ?? user.displayName,
-    data.branchOfService !== undefined ? data.branchOfService : user.branchOfService ?? null,
-    data.dutyStation !== undefined ? data.dutyStation : user.dutyStation ?? null,
-    data.preferredMarketplace !== undefined ? data.preferredMarketplace : user.preferredMarketplace ?? null,
-    now, id,
+  await query(
+    `UPDATE users SET
+      "displayName" = COALESCE($1, "displayName"),
+      "branchOfService" = $2,
+      "dutyStation" = $3,
+      "preferredMarketplace" = $4,
+      "updatedAt" = $5
+    WHERE id = $6`,
+    [
+      data.displayName ?? user.displayName,
+      data.branchOfService !== undefined ? data.branchOfService : user.branchOfService ?? null,
+      data.dutyStation !== undefined ? data.dutyStation : user.dutyStation ?? null,
+      data.preferredMarketplace !== undefined ? data.preferredMarketplace : user.preferredMarketplace ?? null,
+      now, id,
+    ]
   );
 
-  return toPublic(getUserById(id)!);
+  return toPublic((await getUserById(id))!);
 }
 
 function generateToken(userId: string): string {

@@ -6,7 +6,6 @@ import { setItemPhoto, removeItemPhoto, getItemPhoto } from "../services/items.s
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 
-// Ensure uploads directory exists
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -33,10 +32,10 @@ const fileFilter = (_req: Request, file: Express.Multer.File, cb: multer.FileFil
 export const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-export function uploadPhoto(req: Request, res: Response) {
+export async function uploadPhoto(req: Request, res: Response) {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const file = req.file;
 
@@ -44,8 +43,7 @@ export function uploadPhoto(req: Request, res: Response) {
     return res.status(400).json({ error: "No file uploaded" });
   }
 
-  // Delete old photo file if exists
-  const oldPhotoPath = getItemPhoto(id);
+  const oldPhotoPath = await getItemPhoto(id);
   if (oldPhotoPath) {
     const oldFile = path.join(UPLOADS_DIR, oldPhotoPath);
     if (fs.existsSync(oldFile)) {
@@ -53,9 +51,8 @@ export function uploadPhoto(req: Request, res: Response) {
     }
   }
 
-  const item = setItemPhoto(id, file.filename);
+  const item = await setItemPhoto(id, file.filename);
   if (!item) {
-    // Item not found — clean up uploaded file
     fs.unlinkSync(file.path);
     return res.status(404).json({ error: "Item not found" });
   }
@@ -63,21 +60,20 @@ export function uploadPhoto(req: Request, res: Response) {
   return res.status(200).json(item);
 }
 
-export function deletePhoto(req: Request, res: Response) {
+export async function deletePhoto(req: Request, res: Response) {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
-  const photoPath = getItemPhoto(id);
+  const photoPath = await getItemPhoto(id);
   if (!photoPath) {
     return res.status(404).json({ error: "No photo found for this item" });
   }
 
-  // Delete file from filesystem
   const filePath = path.join(UPLOADS_DIR, photoPath);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
   }
 
-  const item = removeItemPhoto(id);
+  const item = await removeItemPhoto(id);
   if (!item) {
     return res.status(404).json({ error: "Item not found" });
   }

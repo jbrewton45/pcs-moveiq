@@ -1,4 +1,4 @@
-import { db } from "../data/database.js";
+import { query } from "../data/database.js";
 import type { Item, Comparable } from "../types/domain.js";
 import type { ComparableCandidate, ComparableLookupInput } from "../types/providers.js";
 import { rowToItem, rowToComparable } from "../utils/converters.js";
@@ -22,9 +22,9 @@ interface PricingResult {
 }
 
 export async function generatePricing(itemId: string): Promise<{ item: Item; comparables: Comparable[] } | null> {
-  const row = db.prepare("SELECT * FROM items WHERE id = ?").get(itemId);
-  if (!row) return null;
-  const item = rowToItem(row as Record<string, unknown>);
+  const itemResult = await query('SELECT * FROM items WHERE id = $1', [itemId]);
+  if (itemResult.rows.length === 0) return null;
+  const item = rowToItem(itemResult.rows[0] as Record<string, unknown>);
 
   const lookupInput: ComparableLookupInput = {
     itemName: item.identifiedName ?? item.itemName,
@@ -50,12 +50,10 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     clarificationAnswers,
   };
 
-  // Run AI pricing and eBay lookup concurrently
   async function runAIPricing(): Promise<PricingResult | null> {
     if (isClaudeAvailable()) {
       const r = await claudePricing(pricingInput);
       if (r) return r as PricingResult;
-      // Claude failed, try OpenAI
       if (isOpenAIAvailable()) {
         const o = await openaiPricing(pricingInput);
         if (o) { const rr = o as PricingResult; rr.reasoning = "[OpenAI] " + rr.reasoning; return rr; }
@@ -73,20 +71,17 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     ? ebayComparables(lookupInput)
     : Promise.resolve(null);
 
-  // Web search for comparables when OpenAI is available
   const webSearchPromise: Promise<ComparableCandidate[] | null> = isOpenAIAvailable()
     ? openaiWebSearchComparables(lookupInput)
     : Promise.resolve(null);
 
   const [aiResult, ebayResult, webResult] = await Promise.all([runAIPricing(), ebayPromise, webSearchPromise]);
 
-  // Combine all real source-backed comparables (eBay API + web search)
   const realComparables: ComparableCandidate[] = [
     ...(ebayResult ?? []),
     ...(webResult ?? []),
   ];
 
-  // Group comparables by configuration match, incorporating clarification answers
   const configResult = groupComparablesByConfig(
     realComparables,
     lookupInput.itemName,
@@ -96,41 +91,38 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
   );
   const answersUsed = clarificationAnswers && Object.keys(clarificationAnswers).length > 0;
 
-  // Use best-matching cluster for cross-validation instead of all comps
   const pricingComps = configResult.bestCluster.length > 0
     ? configResult.bestCluster
     : realComparables;
 
-  // Determine if we have enough evidence to provide pricing
   const hasAI = aiResult != null;
   const hasRealComps = realComparables.length > 0;
+  const now = new Date().toISOString();
 
   if (!hasAI && !hasRealComps) {
-    // NO evidence at all — write "no estimate" to DB and return
-    const now = new Date().toISOString();
-    db.prepare(`
-      UPDATE items SET
-        priceFastSale = NULL, priceFairMarket = NULL, priceReach = NULL,
-        pricingConfidence = NULL,
-        pricingReasoning = ?,
-        pricingSuggestedChannel = NULL, pricingSaleSpeedBand = NULL,
-        pricingLastUpdatedAt = ?, updatedAt = ?
-      WHERE id = ?
-    `).run(
-      "Unable to estimate pricing. No AI providers responded and no comparable listings were found. Try again later, or add a photo and more details to improve results.",
-      now, now, itemId,
+    await query(
+      `UPDATE items SET
+        "priceFastSale" = NULL, "priceFairMarket" = NULL, "priceReach" = NULL,
+        "pricingConfidence" = NULL,
+        "pricingReasoning" = $1,
+        "pricingSuggestedChannel" = NULL, "pricingSaleSpeedBand" = NULL,
+        "pricingLastUpdatedAt" = $2, "updatedAt" = $3
+       WHERE id = $4`,
+      [
+        "Unable to estimate pricing. No AI providers responded and no comparable listings were found. Try again later, or add a photo and more details to improve results.",
+        now, now, itemId,
+      ]
     );
-    db.prepare("DELETE FROM comparables WHERE itemId = ?").run(itemId);
-    rederiveRecommendation(itemId);
-    const finalRow = db.prepare("SELECT * FROM items WHERE id = ?").get(itemId);
-    return { item: rowToItem(finalRow as Record<string, unknown>), comparables: [] };
+    await query('DELETE FROM comparables WHERE "itemId" = $1', [itemId]);
+    await rederiveRecommendation(itemId);
+    const finalResult = await query('SELECT * FROM items WHERE id = $1', [itemId]);
+    return { item: rowToItem(finalResult.rows[0] as Record<string, unknown>), comparables: [] };
   }
 
   let result: PricingResult;
 
   if (hasAI) {
     result = aiResult!;
-    // Apply model guardrails
     const norm = normalizeModel(lookupInput.itemName, lookupInput.brand, lookupInput.model, lookupInput.category);
     if (norm) {
       result.fastSale = applyPriceGuardrails(result.fastSale, norm);
@@ -139,13 +131,11 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
       result.confidence = Math.min(0.95, result.confidence + 0.1);
     }
 
-    // Cross-validate with comparable data if we have enough config-matched comps
     if (pricingComps.length >= 3) {
       const compPrices = pricingComps.map(c => c.price).sort((a, b) => a - b);
       const compMedian = compPrices[Math.floor(compPrices.length / 2)];
       const ratio = result.fairMarket / compMedian;
       if (ratio < 0.5 || ratio > 2.0) {
-        // AI price wildly off from comparable data — adjust toward comps
         result.fastSale = Math.round(compMedian * 0.7);
         result.fairMarket = Math.round(compMedian * 0.9);
         result.reach = Math.round(compMedian * 1.15);
@@ -154,21 +144,16 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
       }
     }
 
-    // Append config adjustment note if present
     if (configResult.adjustmentNote) {
       result.reasoning += ` [${configResult.adjustmentNote}]`;
     }
-
     if (answersUsed) {
       result.reasoning += " [Configuration refined by your answers]";
     }
-
-    // Cap pricing confidence by identification confidence
     if (item.identificationConfidence != null) {
       result.confidence = Math.min(result.confidence, item.identificationConfidence + 0.2);
     }
   } else {
-    // No AI, but we have comparables — derive pricing purely from config-matched comps
     const compPrices = pricingComps.map(c => c.price).sort((a, b) => a - b);
     const compMedian = compPrices[Math.floor(compPrices.length / 2)];
     const lowest = compPrices[0];
@@ -182,19 +167,16 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
       reasoning: `Pricing derived from ${pricingComps.length} comparable listing${pricingComps.length > 1 ? "s" : ""}. No AI analysis was available.`,
       suggestedChannel: compMedian > 200 ? "Facebook Marketplace" : compMedian > 50 ? "Facebook Marketplace or OfferUp" : "Base Yard Sale or Nextdoor",
       saleSpeedBand: compMedian < 30 ? "FAST" : compMedian < 300 ? "MODERATE" : "SLOW",
-      comparables: [], // we only use realComparables below
+      comparables: [],
     };
 
-    // Append config adjustment note if present
     if (configResult.adjustmentNote) {
       result.reasoning += ` [${configResult.adjustmentNote}]`;
     }
-
     if (answersUsed) {
       result.reasoning += " [Configuration refined by your answers]";
     }
 
-    // Apply model guardrails
     const norm = normalizeModel(lookupInput.itemName, lookupInput.brand, lookupInput.model, lookupInput.category);
     if (norm) {
       result.fastSale = applyPriceGuardrails(result.fastSale, norm);
@@ -204,37 +186,33 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     }
   }
 
-  // Save ALL real comparables to the database (not just the best cluster)
   result.comparables = realComparables;
 
-  const now = new Date().toISOString();
-
-  db.prepare(`
-    UPDATE items SET
-      priceFastSale = ?, priceFairMarket = ?, priceReach = ?,
-      pricingConfidence = ?, pricingReasoning = ?,
-      pricingSuggestedChannel = ?, pricingSaleSpeedBand = ?,
-      pricingLastUpdatedAt = ?, updatedAt = ?
-    WHERE id = ?
-  `).run(
-    result.fastSale, result.fairMarket, result.reach,
-    result.confidence, result.reasoning,
-    result.suggestedChannel, result.saleSpeedBand,
-    now, now, itemId,
+  await query(
+    `UPDATE items SET
+      "priceFastSale" = $1, "priceFairMarket" = $2, "priceReach" = $3,
+      "pricingConfidence" = $4, "pricingReasoning" = $5,
+      "pricingSuggestedChannel" = $6, "pricingSaleSpeedBand" = $7,
+      "pricingLastUpdatedAt" = $8, "updatedAt" = $9
+     WHERE id = $10`,
+    [
+      result.fastSale, result.fairMarket, result.reach,
+      result.confidence, result.reasoning,
+      result.suggestedChannel, result.saleSpeedBand,
+      now, now, itemId,
+    ]
   );
 
-  // Replace comparables for this item — only real ones
-  db.prepare("DELETE FROM comparables WHERE itemId = ?").run(itemId);
-
-  const insertComp = db.prepare(`
-    INSERT INTO comparables (id, itemId, title, source, url, thumbnailUrl, price, soldStatus, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  await query('DELETE FROM comparables WHERE "itemId" = $1', [itemId]);
 
   const savedComps: Comparable[] = [];
   for (const comp of result.comparables) {
     const compId = createId("comp");
-    insertComp.run(compId, itemId, comp.title, comp.source, comp.url ?? null, comp.thumbnailUrl ?? null, comp.price, comp.soldStatus ?? null, now);
+    await query(
+      `INSERT INTO comparables (id, "itemId", title, source, url, "thumbnailUrl", price, "soldStatus", "createdAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [compId, itemId, comp.title, comp.source, comp.url ?? null, comp.thumbnailUrl ?? null, comp.price, comp.soldStatus ?? null, now]
+    );
     savedComps.push({
       id: compId, itemId, title: comp.title, source: comp.source,
       url: comp.url, thumbnailUrl: comp.thumbnailUrl,
@@ -242,11 +220,8 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     });
   }
 
-  rederiveRecommendation(itemId);
+  await rederiveRecommendation(itemId);
 
-  // Generate config-tier clarification questions when configuration ambiguity
-  // could materially affect pricing. Only written when the item has no existing
-  // clarification answers (i.e. the user hasn't already answered config questions).
   if (!item.clarificationAnswers) {
     const configClarifications = generateConfigClarifications(
       lookupInput.itemName,
@@ -256,16 +231,14 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     );
 
     if (configClarifications.length > 0) {
-      // Merge with any existing identification clarifications rather than replacing them
       let existingClarifications: unknown[] = [];
       if (item.pendingClarifications) {
         try {
           const parsed = JSON.parse(item.pendingClarifications);
           if (Array.isArray(parsed)) existingClarifications = parsed;
-        } catch { /* ignore malformed data */ }
+        } catch { /* ignore */ }
       }
 
-      // Avoid duplicating questions already present from identification
       const existingFields = new Set(
         existingClarifications
           .filter((q): q is { field: string } => typeof q === "object" && q !== null && "field" in q)
@@ -275,17 +248,19 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
 
       if (newClarifications.length > 0) {
         const merged = [...existingClarifications, ...newClarifications];
-        db.prepare("UPDATE items SET pendingClarifications = ?, updatedAt = ? WHERE id = ?")
-          .run(JSON.stringify(merged), now, itemId);
+        await query(
+          'UPDATE items SET "pendingClarifications" = $1, "updatedAt" = $2 WHERE id = $3',
+          [JSON.stringify(merged), now, itemId]
+        );
       }
     }
   }
 
-  const finalRow = db.prepare("SELECT * FROM items WHERE id = ?").get(itemId);
-  return { item: rowToItem(finalRow as Record<string, unknown>), comparables: savedComps };
+  const finalResult = await query('SELECT * FROM items WHERE id = $1', [itemId]);
+  return { item: rowToItem(finalResult.rows[0] as Record<string, unknown>), comparables: savedComps };
 }
 
-export function getItemComparables(itemId: string): Comparable[] {
-  const rows = db.prepare("SELECT * FROM comparables WHERE itemId = ? ORDER BY createdAt DESC").all(itemId);
-  return rows.map(r => rowToComparable(r as Record<string, unknown>));
+export async function getItemComparables(itemId: string): Promise<Comparable[]> {
+  const result = await query('SELECT * FROM comparables WHERE "itemId" = $1 ORDER BY "createdAt" DESC', [itemId]);
+  return result.rows.map(r => rowToComparable(r as Record<string, unknown>));
 }
