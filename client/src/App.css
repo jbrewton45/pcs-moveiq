@@ -1978,3 +1978,127 @@
   .test-result--fail { background: #450a0a; color: #fca5a5; }
   .provider-help__text code { background: rgba(255, 255, 255, 0.06); }
 }
+
+/* OpenAI provider badge */
+.provider-badge--openai {
+  background: #10a37f;
+  color: #fff;
+}
+
+.comp-source-badge--openai {
+  background: #e6f7f2;
+  color: #10a37f;
+}
+
+/* Clarification section */
+.clarification-section {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg-secondary, #f0f4f8);
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color, #d0d7de);
+}
+
+.clarification-section__title {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.clarification-section__subtitle {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-muted, #656d76);
+}
+
+.clarification-field {
+  margin-bottom: 0.75rem;
+}
+
+.clarification-field__label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-bottom: 0.35rem;
+}
+
+.clarification-field__options {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.clarification-option {
+  flex: 1;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border-color, #d0d7de);
+  border-radius: 0.375rem;
+  background: var(--bg-primary, #fff);
+  cursor: pointer;
+  font-size: 0.8rem;
+  text-align: center;
+  transition: all 0.15s;
+}
+
+.clarification-option:hover {
+  border-color: var(--accent, #0969da);
+}
+
+.clarification-option--selected {
+  background: var(--accent, #0969da);
+  color: #fff;
+  border-color: var(--accent, #0969da);
+}
+
+.clarification-field__select,
+.clarification-field__input {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border-color, #d0d7de);
+  border-radius: 0.375rem;
+  font-size: 0.8rem;
+  background: var(--bg-primary, #fff);
+}
+
+.clarification-submit {
+  margin-top: 0.5rem;
+  width: 100%;
+  padding: 0.5rem;
+  background: var(--accent, #0969da);
+  color: #fff;
+  border: none;
+  border-radius: 0.375rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.clarification-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Dark mode for clarifications */
+@media (prefers-color-scheme: dark) {
+  .clarification-section {
+    background: var(--bg-secondary, #161b22);
+    border-color: var(--border-color, #30363d);
+  }
+
+  .clarification-option {
+    background: var(--bg-primary, #0d1117);
+    border-color: var(--border-color, #30363d);
+    color: var(--text-primary, #e6edf3);
+  }
+
+  .clarification-field__select,
+  .clarification-field__input {
+    background: var(--bg-primary, #0d1117);
+    border-color: var(--border-color, #30363d);
+    color: var(--text-primary, #e6edf3);
+  }
+
+  .comp-source-badge--openai {
+    background: #0d2e23;
+    color: #10a37f;
+  }
+}

@@ -4,6 +4,9 @@ import { bulkDeleteItems, bulkUpdateStatus, createItem, deleteItem, listItemsByP
 import { getProjectById } from "../services/projects.service.js";
 import { getRoomById } from "../services/rooms.service.js";
 import { BulkDeleteSchema, BulkUpdateStatusSchema, CreateItemSchema, UpdateItemSchema } from "../validation/schemas.js";
+import { db } from "../data/database.js";
+import { rowToItem } from "../utils/converters.js";
+import { z } from "zod/v4";
 
 export function getItems(req: Request, res: Response) {
   const projectId = req.query.projectId as string | undefined;
@@ -69,4 +72,38 @@ export function bulkDeleteItemsHandler(req: Request, res: Response) {
   if (!result.success) return res.status(400).json({ error: "Validation failed", details: result.error.issues });
   const count = bulkDeleteItems(result.data.itemIds);
   return res.status(200).json({ deleted: count });
+}
+
+const SubmitClarificationsSchema = z.object({
+  answers: z.record(z.string(), z.string()),
+});
+
+export function submitClarifications(req: Request, res: Response) {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  const parse = SubmitClarificationsSchema.safeParse(req.body);
+  if (!parse.success) {
+    return res.status(400).json({ error: "Validation failed", details: parse.error.issues });
+  }
+
+  // Verify item exists
+  const existing = db.prepare("SELECT * FROM items WHERE id = ?").get(id);
+  if (!existing) {
+    return res.status(404).json({ error: "Item not found" });
+  }
+
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    UPDATE items SET
+      clarificationAnswers = ?,
+      pendingClarifications = NULL,
+      updatedAt = ?
+    WHERE id = ?
+  `).run(JSON.stringify(parse.data.answers), now, id);
+
+  const updated = db.prepare("SELECT * FROM items WHERE id = ?").get(id);
+  if (!updated) return res.status(404).json({ error: "Item not found" });
+
+  return res.status(200).json(rowToItem(updated as Record<string, unknown>));
 }

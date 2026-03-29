@@ -25,6 +25,8 @@ export function rowToItem(row: Record<string, unknown>): Item {
     pricingSaleSpeedBand: (row.pricingSaleSpeedBand as string | null) ?? undefined,
     pricingLastUpdatedAt: (row.pricingLastUpdatedAt as string | null) ?? undefined,
     recommendationReason: (row.recommendationReason as string | null) ?? undefined,
+    pendingClarifications: (row.pendingClarifications as string | null) ?? undefined,
+    clarificationAnswers: (row.clarificationAnswers as string | null) ?? undefined,
   } as Item;
 }
 

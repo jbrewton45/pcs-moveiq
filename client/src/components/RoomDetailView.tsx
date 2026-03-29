@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Item, ItemCondition, ItemStatus, SizeClass, Recommendation, Comparable, ComparableSource } from "../types";
+import type { Item, ItemCondition, ItemStatus, SizeClass, Recommendation, Comparable, ComparableSource, ClarificationQuestion } from "../types";
 import { api } from "../api";
 
 function label(s: string) {
@@ -61,14 +61,33 @@ function ConfidenceDots({ value }: { value: number }) {
 function ProviderBadge({ reasoning, hasEbayComparables }: { reasoning?: string; hasEbayComparables?: boolean }) {
   if (!reasoning) return null;
   const isMock = reasoning.startsWith("[Mock]") || reasoning.startsWith("[Fallback]");
-  const cls = isMock ? "provider-badge--mock" : hasEbayComparables ? "provider-badge--ebay-enhanced" : "provider-badge--live";
-  const text = isMock ? "Mock estimate" : hasEbayComparables ? "AI + eBay data" : "AI-powered";
+  const isOpenAI = reasoning.startsWith("[OpenAI]");
+  let cls: string;
+  let text: string;
+  if (isMock) {
+    cls = "provider-badge--mock";
+    text = "Mock estimate";
+  } else if (isOpenAI) {
+    cls = "provider-badge--openai";
+    text = "OpenAI-powered";
+  } else if (hasEbayComparables) {
+    cls = "provider-badge--ebay-enhanced";
+    text = "AI + eBay data";
+  } else {
+    cls = "provider-badge--live";
+    text = "AI-powered";
+  }
   return (
     <span className={`provider-badge ${cls}`}>{text}</span>
   );
 }
 
-const SOURCE_LABEL: Record<ComparableSource, string> = { claude: "Claude", ebay: "eBay", mock: "Mock" };
+const SOURCE_LABEL: Record<string, string> = {
+  claude: "Claude",
+  openai: "OpenAI",
+  ebay: "eBay",
+  mock: "Mock",
+};
 
 function SourceSummary({ comparables }: { comparables: Comparable[] }) {
   const counts = new Map<ComparableSource, number>();
@@ -77,7 +96,7 @@ function SourceSummary({ comparables }: { comparables: Comparable[] }) {
   }
   if (counts.size < 2) return null;
   const parts: string[] = [];
-  for (const src of ["ebay", "claude", "mock"] as ComparableSource[]) {
+  for (const src of ["ebay", "claude", "openai", "mock"] as ComparableSource[]) {
     const n = counts.get(src);
     if (n) parts.push(`${n} from ${SOURCE_LABEL[src]}`);
   }
@@ -88,7 +107,7 @@ function SourceSummary({ comparables }: { comparables: Comparable[] }) {
 
 function cleanReasoning(reasoning?: string): string {
   if (!reasoning) return "";
-  return reasoning.replace(/^\[(Mock|Fallback)\]\s*/, "");
+  return reasoning.replace(/^\[(Mock|Fallback|OpenAI)\]\s*/, "");
 }
 
 // ---------- ItemReadCard ----------
@@ -102,6 +121,7 @@ interface ItemReadCardProps {
   onIdentify: (id: string) => void;
   onPricing: (id: string) => void;
   onConfirm: (id: string) => void;
+  onItemUpdated?: (item: Item) => void;
   identifying: boolean;
   pricing: boolean;
   confirming: boolean;
@@ -119,6 +139,7 @@ function ItemReadCard({
   onIdentify,
   onPricing,
   onConfirm,
+  onItemUpdated,
   identifying,
   pricing,
   confirming,
@@ -126,6 +147,9 @@ function ItemReadCard({
   identifyError,
   pricingError,
 }: ItemReadCardProps) {
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [submittingClarifications, setSubmittingClarifications] = useState(false);
+
   const cardClass = [
     "item-card",
     selectMode ? "item-card--selectable" : "",
@@ -219,6 +243,74 @@ function ItemReadCard({
             )}
           </div>
         )}
+
+        {(() => {
+          const clarifications: ClarificationQuestion[] = item.pendingClarifications
+            ? JSON.parse(item.pendingClarifications)
+            : [];
+          if (clarifications.length === 0) return null;
+          return (
+            <div className="clarification-section">
+              <h4 className="clarification-section__title">Quick Questions</h4>
+              <p className="clarification-section__subtitle">These details could significantly affect pricing</p>
+              {clarifications.map((q) => (
+                <div key={q.field} className="clarification-field">
+                  <label className="clarification-field__label">{q.question}</label>
+                  {q.inputType === "boolean" ? (
+                    <div className="clarification-field__options">
+                      <button
+                        className={`clarification-option ${answers[q.field] === "yes" ? "clarification-option--selected" : ""}`}
+                        onClick={() => setAnswers(a => ({ ...a, [q.field]: "yes" }))}
+                      >Yes</button>
+                      <button
+                        className={`clarification-option ${answers[q.field] === "no" ? "clarification-option--selected" : ""}`}
+                        onClick={() => setAnswers(a => ({ ...a, [q.field]: "no" }))}
+                      >No</button>
+                    </div>
+                  ) : q.inputType === "select" && q.options ? (
+                    <select
+                      className="clarification-field__select"
+                      value={answers[q.field] ?? ""}
+                      onChange={(e) => setAnswers(a => ({ ...a, [q.field]: e.target.value }))}
+                    >
+                      <option value="">Select...</option>
+                      {q.options.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      className="clarification-field__input"
+                      type="text"
+                      value={answers[q.field] ?? ""}
+                      onChange={(e) => setAnswers(a => ({ ...a, [q.field]: e.target.value }))}
+                      placeholder="Type your answer..."
+                    />
+                  )}
+                </div>
+              ))}
+              <button
+                className="clarification-submit"
+                disabled={submittingClarifications || Object.keys(answers).length === 0}
+                onClick={async () => {
+                  setSubmittingClarifications(true);
+                  try {
+                    const updated = await api.submitClarifications(item.id, answers);
+                    onItemUpdated?.(updated);
+                    setAnswers({});
+                    await onPricing(item.id);
+                  } catch {
+                    // show error silently
+                  } finally {
+                    setSubmittingClarifications(false);
+                  }
+                }}
+              >
+                {submittingClarifications ? "Submitting..." : "Submit & Refresh Pricing"}
+              </button>
+            </div>
+          );
+        })()}
 
         {item.priceFairMarket != null && (
           <div className="item-card__pricing">
@@ -746,6 +838,10 @@ export function RoomDetailView({
     finally { setConfirming(false); }
   }
 
+  function handleItemUpdated(updated: Item) {
+    setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+  }
+
   const showBulkBar = selectMode && selectedIds.size > 0;
   const roomWeight = items.reduce((sum, i) => sum + (i.weightLbs ?? 0), 0);
 
@@ -821,6 +917,7 @@ export function RoomDetailView({
                   onIdentify={handleIdentify}
                   onPricing={handlePricing}
                   onConfirm={handleConfirm}
+                  onItemUpdated={handleItemUpdated}
                   identifying={identifying === item.id}
                   pricing={pricing === item.id}
                   confirming={confirming}

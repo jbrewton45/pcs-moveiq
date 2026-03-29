@@ -42,6 +42,7 @@ export function ProviderSettings({ onBack }: Props) {
   const [status, setStatus] = useState<ProviderStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [testingClaude, setTestingClaude] = useState(false);
+  const [testingOpenai, setTestingOpenai] = useState(false);
   const [testingEbay, setTestingEbay] = useState(false);
 
   useEffect(() => {
@@ -61,6 +62,18 @@ export function ProviderSettings({ onBack }: Props) {
       } : prev);
     } catch { /* silent */ }
     finally { setTestingClaude(false); }
+  }
+
+  async function handleTestOpenAI() {
+    setTestingOpenai(true);
+    try {
+      const result = await api.testOpenAI();
+      setStatus(prev => prev ? {
+        ...prev,
+        openai: { ...prev.openai, lastTest: result },
+      } : prev);
+    } catch { /* silent */ }
+    finally { setTestingOpenai(false); }
   }
 
   async function handleTestEbay() {
@@ -147,6 +160,43 @@ export function ProviderSettings({ onBack }: Props) {
           </div>
 
           <TestResult result={status.claude.lastTest} />
+        </div>
+
+        <div className={`provider-card ${status.openai.configured ? "provider-card--configured" : "provider-card--unconfigured"}`}>
+          <div className="provider-card__header">
+            <div className="provider-card__name-row">
+              <span className="provider-card__name">OpenAI</span>
+              <span className={`provider-card__status ${status.openai.configured ? "provider-card__status--on" : "provider-card__status--off"}`}>
+                {status.openai.configured ? "Configured" : "Not configured"}
+              </span>
+            </div>
+            <p className="provider-card__desc">Item identification and pricing estimates (GPT-4o Vision)</p>
+          </div>
+
+          <div className="provider-card__details">
+            <div className="provider-card__field">
+              <span className="provider-card__field-label">API Key</span>
+              <code className="provider-card__field-value">
+                {status.openai.maskedKey ?? "Not set"}
+              </code>
+            </div>
+            <div className="provider-card__field">
+              <span className="provider-card__field-label">Env Variable</span>
+              <code className="provider-card__field-value">OPENAI_API_KEY</code>
+            </div>
+          </div>
+
+          <div className="provider-card__actions">
+            <button
+              className="btn-action-sm"
+              disabled={!status.openai.configured || testingOpenai}
+              onClick={handleTestOpenAI}
+            >
+              {testingOpenai ? "Testing..." : "Test Connection"}
+            </button>
+          </div>
+
+          <TestResult result={status.openai.lastTest} />
         </div>
 
         <div className={`provider-card ${status.ebay.configured ? "provider-card--configured" : "provider-card--unconfigured"}`}>

@@ -155,6 +155,14 @@ export const api = {
   testClaude: () => request<ProviderTestResult>("/providers/test/claude", { method: "POST" }),
 
   testEbay: () => request<ProviderTestResult>("/providers/test/ebay", { method: "POST" }),
+
+  testOpenAI: () => request<ProviderTestResult>("/providers/test/openai", { method: "POST" }),
+
+  submitClarifications: (itemId: string, answers: Record<string, string>) =>
+    request<Item>(`/items/${itemId}/clarifications`, {
+      method: "POST",
+      body: JSON.stringify({ answers }),
+    }),
 };
 
 export interface ProviderTestResult {
@@ -165,6 +173,12 @@ export interface ProviderTestResult {
 
 export interface ProviderStatus {
   claude: {
+    configured: boolean;
+    maskedKey: string | null;
+    mode: "live" | "unavailable";
+    lastTest?: ProviderTestResult;
+  };
+  openai: {
     configured: boolean;
     maskedKey: string | null;
     mode: "live" | "unavailable";

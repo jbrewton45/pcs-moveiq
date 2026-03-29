@@ -141,3 +141,12 @@ db.exec(`
     createdAt TEXT NOT NULL
   )
 `);
+
+// Migration: add clarification columns to items
+try {
+  db.exec("ALTER TABLE items ADD COLUMN pendingClarifications TEXT");
+} catch { /* exists */ }
+
+try {
+  db.exec("ALTER TABLE items ADD COLUMN clarificationAnswers TEXT");
+} catch { /* exists */ }

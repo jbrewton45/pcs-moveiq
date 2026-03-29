@@ -2,6 +2,7 @@ import { db } from "../data/database.js";
 import type { Item } from "../types/domain.js";
 import { rowToItem } from "../utils/converters.js";
 import { claudeIdentify, isClaudeAvailable } from "../providers/claude.provider.js";
+import { openaiIdentify, isOpenAIAvailable } from "../providers/openai.provider.js";
 
 interface IdentificationResult {
   identifiedName: string;
@@ -10,6 +11,8 @@ interface IdentificationResult {
   identifiedModel?: string;
   confidence: number;
   reasoning: string;
+  isSpecialty?: boolean;
+  clarifications?: import("../types/domain.js").ClarificationQuestion[];
 }
 
 // Mock provider — returns suggestions based on existing item data
@@ -37,6 +40,8 @@ function mockIdentify(item: Item): IdentificationResult {
     reasoning: hasPhoto
       ? `Identified based on item details and attached photo. Category "${item.category}" recognized with photo context.`
       : `Identified based on item name and category. No photo available — confidence is lower. Consider adding a photo for better results.`,
+    isSpecialty: false,
+    clarifications: [],
   };
 }
 
@@ -49,6 +54,7 @@ export async function identifyItem(itemId: string): Promise<Item | null> {
   let result: IdentificationResult;
 
   if (isClaudeAvailable()) {
+    // 1. Try Claude first
     const claudeResult = await claudeIdentify({
       itemName: currentItem.itemName,
       category: currentItem.category,
@@ -57,23 +63,69 @@ export async function identifyItem(itemId: string): Promise<Item | null> {
       photoPath: currentItem.photoPath,
       notes: currentItem.notes,
     });
+
     if (claudeResult) {
-      result = claudeResult;
+      result = claudeResult as IdentificationResult;
+    } else if (isOpenAIAvailable()) {
+      // 2. Claude failed — fall back to OpenAI
+      const openaiResult = await openaiIdentify({
+        itemName: currentItem.itemName,
+        category: currentItem.category,
+        condition: currentItem.condition,
+        sizeClass: currentItem.sizeClass,
+        photoPath: currentItem.photoPath,
+        notes: currentItem.notes,
+      });
+
+      if (openaiResult) {
+        result = openaiResult as IdentificationResult;
+        result.reasoning = "[OpenAI] " + result.reasoning;
+      } else {
+        result = mockIdentify(currentItem);
+        result.reasoning = "[Fallback] " + result.reasoning;
+      }
+    } else {
+      // Claude failed, no OpenAI — use mock
+      result = mockIdentify(currentItem);
+      result.reasoning = "[Fallback] " + result.reasoning;
+    }
+  } else if (isOpenAIAvailable()) {
+    // 2. Claude not configured — try OpenAI
+    const openaiResult = await openaiIdentify({
+      itemName: currentItem.itemName,
+      category: currentItem.category,
+      condition: currentItem.condition,
+      sizeClass: currentItem.sizeClass,
+      photoPath: currentItem.photoPath,
+      notes: currentItem.notes,
+    });
+
+    if (openaiResult) {
+      result = openaiResult as IdentificationResult;
+      result.reasoning = "[OpenAI] " + result.reasoning;
     } else {
       result = mockIdentify(currentItem);
       result.reasoning = "[Fallback] " + result.reasoning;
     }
   } else {
+    // 3. Neither Claude nor OpenAI available — use mock
     result = mockIdentify(currentItem);
     result.reasoning = "[Mock] " + result.reasoning;
   }
 
   const now = new Date().toISOString();
 
+  // Serialize clarifications to JSON if present and non-empty
+  const pendingClarificationsJson =
+    result.clarifications && result.clarifications.length > 0
+      ? JSON.stringify(result.clarifications)
+      : null;
+
   db.prepare(`
     UPDATE items SET
       identifiedName = ?, identifiedCategory = ?, identifiedBrand = ?, identifiedModel = ?,
       identificationConfidence = ?, identificationReasoning = ?, identificationStatus = ?,
+      pendingClarifications = ?,
       updatedAt = ?
     WHERE id = ?
   `).run(
@@ -84,8 +136,9 @@ export async function identifyItem(itemId: string): Promise<Item | null> {
     result.confidence,
     result.reasoning,
     "SUGGESTED",
+    pendingClarificationsJson,
     now,
-    itemId
+    itemId,
   );
 
   const updated = db.prepare("SELECT * FROM items WHERE id = ?").get(itemId);
@@ -123,7 +176,7 @@ export function confirmIdentification(itemId: string, edits?: {
       edits.identifiedModel ?? (r.identifiedModel as string | null) ?? null,
       status,
       now,
-      itemId
+      itemId,
     );
   } else {
     db.prepare("UPDATE items SET identificationStatus = ?, updatedAt = ? WHERE id = ?")

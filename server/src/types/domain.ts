@@ -98,6 +98,13 @@ export interface Room {
   updatedAt: string;
 }
 
+export interface ClarificationQuestion {
+  field: string;       // e.g. "lensIncluded", "shutterCount", "majorDamage"
+  question: string;    // human-readable question
+  inputType: "boolean" | "text" | "select";
+  options?: string[];  // for select type
+}
+
 export interface Item {
   id: string;
   projectId: string;
@@ -130,11 +137,13 @@ export interface Item {
   pricingSuggestedChannel?: string;
   pricingSaleSpeedBand?: string;
   pricingLastUpdatedAt?: string;
+  pendingClarifications?: string; // JSON-serialized ClarificationQuestion[]
+  clarificationAnswers?: string;  // JSON-serialized Record<string, string>
   createdAt: string;
   updatedAt: string;
 }
 
-export type ComparableSource = "claude" | "ebay" | "mock";
+export type ComparableSource = "claude" | "openai" | "ebay" | "mock";
 
 export interface Comparable {
   id: string;
@@ -146,4 +155,14 @@ export interface Comparable {
   price: number;
   soldStatus?: string;
   createdAt: string;
+}
+
+export interface ModelNormalization {
+  canonicalName: string;
+  brand: string;
+  model: string;
+  category: string;
+  isSpecialty: boolean;
+  minReasonablePrice: number;
+  maxReasonablePrice: number;
 }

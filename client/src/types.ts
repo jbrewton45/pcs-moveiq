@@ -14,7 +14,7 @@ export type MoveType = "CONUS" | "OCONUS" | "JAPAN" | "EUROPE" | "STORAGE_ONLY";
 
 export type IdentificationStatus = "NONE" | "SUGGESTED" | "CONFIRMED" | "EDITED";
 
-export type ComparableSource = "claude" | "ebay" | "mock";
+export type ComparableSource = "claude" | "openai" | "ebay" | "mock";
 
 export interface Comparable {
   id: string;
@@ -87,6 +87,13 @@ export interface Room {
   updatedAt: string;
 }
 
+export interface ClarificationQuestion {
+  field: string;       // e.g. "lensIncluded", "shutterCount", "majorDamage"
+  question: string;    // human-readable question
+  inputType: "boolean" | "text" | "select";
+  options?: string[];  // for select type
+}
+
 export interface Item {
   id: string;
   projectId: string;
@@ -119,6 +126,8 @@ export interface Item {
   pricingSuggestedChannel?: string;
   pricingSaleSpeedBand?: string;
   pricingLastUpdatedAt?: string;
+  pendingClarifications?: string; // JSON-serialized ClarificationQuestion[]
+  clarificationAnswers?: string;  // JSON-serialized Record<string, string>
   createdAt: string;
   updatedAt: string;
 }

@@ -4,8 +4,10 @@ import type { ComparableCandidate, ComparableLookupInput } from "../types/provid
 import { rowToItem, rowToComparable } from "../utils/converters.js";
 import { createId } from "../utils/id.js";
 import { claudePricing, isClaudeAvailable } from "../providers/claude.provider.js";
+import { openaiPricing, isOpenAIAvailable } from "../providers/openai.provider.js";
 import { isEbayAvailable, ebayComparables } from "../providers/ebay.provider.js";
 import { rederiveRecommendation } from "./items.service.js";
+import { normalizeModel, applyPriceGuardrails } from "../utils/model-normalizer.js";
 
 interface PricingResult {
   fastSale: number;
@@ -71,7 +73,6 @@ function mockPricing(item: Item): PricingResult {
   // Generate mock comparables
   const comparables: ComparableCandidate[] = [];
   const itemName = item.identifiedName ?? item.itemName;
-  const sources = ["Facebook Marketplace", "OfferUp", "Craigslist"];
 
   for (let i = 0; i < 3; i++) {
     const priceVariance = 1 + (Math.random() - 0.5) * pricing.variance * 2;
@@ -112,37 +113,93 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     model: item.identifiedModel,
   };
 
-  // Run primary pricing and eBay lookup concurrently
-  const primaryPricingPromise: Promise<PricingResult | null> = isClaudeAvailable()
-    ? claudePricing({
-        itemName: lookupInput.itemName,
-        category: lookupInput.category,
-        condition: item.condition,
-        sizeClass: item.sizeClass,
-        brand: lookupInput.brand,
-        model: lookupInput.model,
-        notes: item.notes,
-      })
-    : Promise.resolve(null);
+  // Deserialize clarification answers if available
+  let clarificationAnswers: Record<string, string> | undefined;
+  if (item.clarificationAnswers) {
+    try {
+      clarificationAnswers = JSON.parse(item.clarificationAnswers) as Record<string, string>;
+    } catch {
+      clarificationAnswers = undefined;
+    }
+  }
+
+  // Build the primary pricing input
+  const pricingInput = {
+    itemName: lookupInput.itemName,
+    category: lookupInput.category,
+    condition: item.condition,
+    sizeClass: item.sizeClass,
+    brand: lookupInput.brand,
+    model: lookupInput.model,
+    notes: item.notes,
+    clarificationAnswers,
+  };
+
+  // Run primary pricing and eBay lookup concurrently.
+  // Primary pricing runs through the fallback chain: Claude → OpenAI → null
+  async function runPrimaryPricing(): Promise<PricingResult | null> {
+    if (isClaudeAvailable()) {
+      const claudeResult = await claudePricing(pricingInput);
+      if (claudeResult) return claudeResult as PricingResult;
+
+      // Claude failed — fall back to OpenAI if available
+      if (isOpenAIAvailable()) {
+        const openaiResult = await openaiPricing(pricingInput);
+        if (openaiResult) {
+          const r = openaiResult as PricingResult;
+          r.reasoning = "[OpenAI] " + r.reasoning;
+          return r;
+        }
+      }
+
+      return null;
+    }
+
+    if (isOpenAIAvailable()) {
+      const openaiResult = await openaiPricing(pricingInput);
+      if (openaiResult) {
+        const r = openaiResult as PricingResult;
+        r.reasoning = "[OpenAI] " + r.reasoning;
+        return r;
+      }
+    }
+
+    return null;
+  }
 
   const ebayPromise: Promise<ComparableCandidate[] | null> = isEbayAvailable()
     ? ebayComparables(lookupInput)
     : Promise.resolve(null);
 
-  const [primaryResult, ebayResult] = await Promise.all([primaryPricingPromise, ebayPromise]);
+  const [primaryResult, ebayResult] = await Promise.all([runPrimaryPricing(), ebayPromise]);
 
   let result: PricingResult;
 
-  if (isClaudeAvailable()) {
-    if (primaryResult) {
-      result = primaryResult as PricingResult;
-    } else {
-      result = mockPricing(item);
-      result.reasoning = "[Fallback] " + result.reasoning;
-    }
+  if (primaryResult) {
+    result = primaryResult;
+  } else if (isClaudeAvailable() || isOpenAIAvailable()) {
+    // An AI provider was configured but failed — use mock with fallback prefix
+    result = mockPricing(item);
+    result.reasoning = "[Fallback] " + result.reasoning;
   } else {
+    // No AI providers configured — pure mock
     result = mockPricing(item);
     result.reasoning = "[Mock] " + result.reasoning;
+  }
+
+  // Apply model guardrails if a known model is recognized
+  const norm = normalizeModel(
+    lookupInput.itemName,
+    lookupInput.brand,
+    lookupInput.model,
+    lookupInput.category,
+  );
+  if (norm) {
+    result.fastSale = applyPriceGuardrails(result.fastSale, norm);
+    result.fairMarket = applyPriceGuardrails(result.fairMarket, norm);
+    result.reach = applyPriceGuardrails(result.reach, norm);
+    // Bump confidence for known model match
+    result.confidence = Math.min(0.95, result.confidence + 0.1);
   }
 
   // Merge comparables: primary first, then eBay results
@@ -165,7 +222,7 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     result.fastSale, result.fairMarket, result.reach,
     result.confidence, result.reasoning,
     result.suggestedChannel, result.saleSpeedBand,
-    now, now, itemId
+    now, now, itemId,
   );
 
   // Replace comparables for this item
@@ -182,7 +239,7 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     insertComp.run(
       compId, itemId, comp.title, comp.source,
       comp.url ?? null, comp.thumbnailUrl ?? null,
-      comp.price, comp.soldStatus ?? null, now
+      comp.price, comp.soldStatus ?? null, now,
     );
     savedComps.push({
       id: compId,

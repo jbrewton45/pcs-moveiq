@@ -1,7 +1,9 @@
 import type { Request, Response } from "express";
 import { isClaudeAvailable } from "../providers/claude.provider.js";
 import { isEbayAvailable, getAccessToken } from "../providers/ebay.provider.js";
+import { isOpenAIAvailable } from "../providers/openai.provider.js";
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 
 function maskKey(key: string | undefined): string | null {
   if (!key) return null;
@@ -11,6 +13,12 @@ function maskKey(key: string | undefined): string | null {
 
 export interface ProviderStatus {
   claude: {
+    configured: boolean;
+    maskedKey: string | null;
+    mode: "live" | "unavailable";
+    lastTest?: { ok: boolean; message: string; testedAt: string };
+  };
+  openai: {
     configured: boolean;
     maskedKey: string | null;
     mode: "live" | "unavailable";
@@ -28,15 +36,24 @@ export interface ProviderStatus {
 
 // In-memory test result cache (resets on server restart)
 let claudeLastTest: { ok: boolean; message: string; testedAt: string } | undefined;
+let openaiLastTest: { ok: boolean; message: string; testedAt: string } | undefined;
 let ebayLastTest: { ok: boolean; message: string; testedAt: string } | undefined;
 
 export function getProviderStatus(_req: Request, res: Response): void {
   const claudeConfigured = isClaudeAvailable();
+  const openaiConfigured = isOpenAIAvailable();
   const ebayConfigured = isEbayAvailable();
 
+  // overallMode logic:
+  //   "live"     — Claude OR OpenAI is configured (AI pricing/identification available)
+  //   "fallback" — only eBay (or some partial non-AI provider) configured
+  //   "mock"     — no AI providers configured
   let overallMode: "live" | "fallback" | "mock" = "mock";
-  if (claudeConfigured && ebayConfigured) overallMode = "live";
-  else if (claudeConfigured || ebayConfigured) overallMode = "fallback";
+  if (claudeConfigured || openaiConfigured) {
+    overallMode = ebayConfigured ? "live" : "fallback";
+  } else if (ebayConfigured) {
+    overallMode = "fallback";
+  }
 
   const status: ProviderStatus = {
     claude: {
@@ -44,6 +61,12 @@ export function getProviderStatus(_req: Request, res: Response): void {
       maskedKey: maskKey(process.env.ANTHROPIC_API_KEY),
       mode: claudeConfigured ? "live" : "unavailable",
       lastTest: claudeLastTest,
+    },
+    openai: {
+      configured: openaiConfigured,
+      maskedKey: maskKey(process.env.OPENAI_API_KEY),
+      mode: openaiConfigured ? "live" : "unavailable",
+      lastTest: openaiLastTest,
     },
     ebay: {
       configured: ebayConfigured,
@@ -82,6 +105,32 @@ export async function testClaude(_req: Request, res: Response): Promise<void> {
   }
 
   res.json(claudeLastTest);
+}
+
+export async function testOpenAI(_req: Request, res: Response): Promise<void> {
+  const now = new Date().toISOString();
+
+  if (!isOpenAIAvailable()) {
+    openaiLastTest = { ok: false, message: "No API key configured", testedAt: now };
+    res.json(openaiLastTest);
+    return;
+  }
+
+  try {
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const response = await client.chat.completions.create({
+      model: "gpt-4o",
+      max_tokens: 5,
+      messages: [{ role: "user", content: "Reply with only the word: OK" }],
+    });
+    const text = response.choices[0]?.message?.content ?? "";
+    openaiLastTest = { ok: true, message: `Connected — model responded: "${text.trim()}"`, testedAt: now };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    openaiLastTest = { ok: false, message: msg.length > 200 ? msg.slice(0, 200) + "…" : msg, testedAt: now };
+  }
+
+  res.json(openaiLastTest);
 }
 
 export async function testEbay(_req: Request, res: Response): Promise<void> {
