@@ -37,6 +37,8 @@ interface VoiceCaptureProps {
   roomType?: string;
   onItemCreated: () => void;
   onCancel: () => void;
+  walkthrough?: boolean;
+  onNextItem?: () => void;
 }
 
 type CaptureState = "idle" | "recording" | "parsing" | "draft";
@@ -71,6 +73,7 @@ export function VoiceCapture({
   roomType,
   onItemCreated,
   onCancel,
+  walkthrough,
 }: VoiceCaptureProps) {
   const [captureState, setCaptureState] = useState<CaptureState>("idle");
   const [finalTranscript, setFinalTranscript] = useState("");
@@ -89,8 +92,16 @@ export function VoiceCapture({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
+  // Photo state
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+
+  // Walkthrough state
+  const [itemCount, setItemCount] = useState(0);
+
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // Clean up on unmount
   useEffect(() => {
@@ -156,7 +167,6 @@ export function VoiceCapture({
       // Only transition if we are still in "recording" state (not already stopped manually)
       setCaptureState((prev) => {
         if (prev === "recording") {
-          // Trigger parse via a side-effect below
           return "parsing";
         }
         return prev;
@@ -175,6 +185,13 @@ export function VoiceCapture({
     // onend fires next and transitions state to "parsing"
   }
 
+  function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  }
+
   // When state becomes "parsing", call the API
   useEffect(() => {
     if (captureState !== "parsing") return;
@@ -187,8 +204,12 @@ export function VoiceCapture({
     }
 
     let cancelled = false;
-    api
-      .parseVoiceTranscript(transcript, roomType)
+
+    const parsePromise = photoFile
+      ? api.parseVoiceWithPhoto(transcript, photoFile, roomType)
+      : api.parseVoiceTranscript(transcript, roomType);
+
+    parsePromise
       .then((parsed) => {
         if (cancelled) return;
         setDraft({
@@ -221,7 +242,7 @@ export function VoiceCapture({
     setSaving(true);
     setSaveError("");
     try {
-      await api.createItem({
+      const item = await api.createItem({
         projectId,
         roomId,
         itemName: draft.itemName,
@@ -233,7 +254,17 @@ export function VoiceCapture({
         keepFlag: draft.keepFlag,
         sentimentalFlag: draft.sentimentalFlag,
       });
-      onItemCreated();
+      // Upload photo if captured
+      if (photoFile && item.id) {
+        try { await api.uploadItemPhoto(item.id, photoFile); } catch { /* photo upload failed, item still saved */ }
+      }
+      if (walkthrough) {
+        setItemCount((c) => c + 1);
+        handleDiscard(); // reset to idle for next item
+        onItemCreated(); // trigger list refresh
+      } else {
+        onItemCreated();
+      }
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to save item");
     } finally {
@@ -246,6 +277,8 @@ export function VoiceCapture({
     setFinalTranscript("");
     setInterimTranscript("");
     setError("");
+    setPhotoFile(null);
+    setPhotoPreview(null);
   }
 
   // ── Unsupported browser ──────────────────────────────────────────────────
@@ -266,21 +299,53 @@ export function VoiceCapture({
   if (captureState === "idle") {
     return (
       <div className="voice-capture">
+        {walkthrough && (
+          <div className="voice-capture__walkthrough-status">
+            <span className="voice-capture__item-count">
+              {itemCount} item{itemCount !== 1 ? "s" : ""} added
+            </span>
+            <button className="btn-cancel" type="button" onClick={onCancel}>
+              Done
+            </button>
+          </div>
+        )}
         <div className="voice-capture__mic-area">
-          <button
-            className="voice-capture__mic-btn"
-            type="button"
-            aria-label="Start voice capture"
-            onClick={startRecording}
-          >
-            🎤
-          </button>
-          <span className="voice-capture__mic-label">Tap to speak</span>
+          <div className="voice-capture__input-row">
+            <button
+              className="voice-capture__mic-btn"
+              type="button"
+              aria-label="Start voice capture"
+              onClick={startRecording}
+            >
+              🎤
+            </button>
+            <button
+              className="voice-capture__photo-btn"
+              type="button"
+              aria-label="Take or select a photo"
+              onClick={() => fileRef.current?.click()}
+            >
+              📷
+            </button>
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            capture="environment"
+            className="sr-only"
+            onChange={handlePhotoSelect}
+          />
+          <span className="voice-capture__mic-label">
+            {photoFile ? `Photo ready · Tap mic to speak` : "Tap to speak"}
+          </span>
           {error && <p className="voice-capture__error">{error}</p>}
         </div>
-        <button className="btn-cancel" type="button" onClick={onCancel}>
-          Cancel
-        </button>
+        {!walkthrough && (
+          <button className="btn-cancel" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
       </div>
     );
   }
@@ -333,6 +398,19 @@ export function VoiceCapture({
 
       <form onSubmit={handleSaveDraft}>
         {saveError && <p className="voice-capture__error">{saveError}</p>}
+
+        {photoPreview && (
+          <div className="voice-capture__photo-preview">
+            <img src={photoPreview} alt="Captured" />
+            <button
+              type="button"
+              className="voice-capture__photo-remove"
+              onClick={() => { setPhotoFile(null); setPhotoPreview(null); }}
+            >
+              Remove
+            </button>
+          </div>
+        )}
 
         <label className="item-edit-form" style={{ display: "block", marginBottom: "0.75rem", fontSize: "0.85rem", fontWeight: 600 }}>
           Item Name
@@ -442,7 +520,7 @@ export function VoiceCapture({
             type="submit"
             disabled={saving}
           >
-            {saving ? "Saving..." : "Save Item"}
+            {saving ? "Saving..." : walkthrough ? "Save & Next" : "Save Item"}
           </button>
         </div>
       </form>

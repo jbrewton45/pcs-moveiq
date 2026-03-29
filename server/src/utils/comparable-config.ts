@@ -14,6 +14,14 @@ export interface ConfigGroupResult {
   adjustmentNote?: string;
 }
 
+export interface ConfigClarification {
+  field: string;
+  question: string;
+  inputType: "boolean" | "select";
+  options?: string[];
+  category: string; // which accessory category triggered this
+}
+
 // Universal accessory/bundle keywords by category patterns
 const BUNDLE_INDICATORS: RegExp[] = [
   /\bbundle\b/i, /\bkit\b/i, /\bpackage\b/i, /\bset\b/i,
@@ -75,8 +83,10 @@ const HIGH_VALUE_ACCESSORIES: Record<string, RegExp[]> = {
 
 /**
  * Detect which high-value accessory category applies based on item context.
+ * Exported so external callers (e.g. generateConfigClarifications) can use it
+ * without re-implementing the detection logic.
  */
-function detectAccessoryCategory(itemName: string, category?: string): string | null {
+export function detectAccessoryCategory(itemName: string, category?: string): string | null {
   const text = `${itemName} ${category ?? ""}`.toLowerCase();
   if (/camera|mirrorless|dslr|a7|canon\s*r|nikon\s*z|sony\s*a\d/i.test(text)) return "camera";
   if (/3d\s*print|bambu|prusa|ender|creality/i.test(text)) return "printer_3d";
@@ -240,4 +250,166 @@ export function groupComparablesByConfig(
     allClassified: classified,
     adjustmentNote: "Limited comparable data — prices based on mixed configurations",
   };
+}
+
+/**
+ * Generate 0-2 targeted clarification questions when config-tier uncertainty
+ * could materially affect pricing for specialty/accessory-heavy item categories.
+ *
+ * Returns an empty array for generic household items where configuration does
+ * not meaningfully change the resale price range.
+ */
+export function generateConfigClarifications(
+  itemName: string,
+  notes?: string,
+  category?: string,
+  comparables?: ComparableCandidate[],
+): ConfigClarification[] {
+  const accCategory = detectAccessoryCategory(itemName, category);
+  if (!accCategory) return []; // generic item — no config questions needed
+
+  const userTier = classifyUserItem(itemName, notes, category);
+
+  // If the tier is not base, the user's description already signals accessories —
+  // no need to ask. We only probe when the description is ambiguous (base tier,
+  // short/absent notes).
+  const notesAreMeaningful = notes && notes.trim().length > 20;
+  if (userTier !== "base" || notesAreMeaningful) {
+    // Still ask if the comparable price spread is wide and tier was only base_plus
+    if (userTier !== "base") {
+      // Check if comps have a tight spread — if so, config doesn't matter enough to ask
+      if (comparables && comparables.length >= 3) {
+        const prices = comparables.map(c => c.price).sort((a, b) => a - b);
+        const spread = prices[prices.length - 1] / prices[0];
+        if (spread < 1.5) return [];
+      }
+      return []; // notes already describe the config sufficiently
+    }
+  }
+
+  // For base-tier items with sparse notes, check if the comparable spread is
+  // wide enough that clarifying the config would materially change pricing.
+  if (comparables && comparables.length >= 3) {
+    const prices = comparables.map(c => c.price).sort((a, b) => a - b);
+    const spread = prices[prices.length - 1] / prices[0];
+    if (spread < 1.5) return []; // tight spread — config doesn't move the needle
+  }
+
+  // Category-specific targeted questions (one canonical question per category)
+  const categoryQuestions: Record<string, ConfigClarification[]> = {
+    camera: [
+      {
+        field: "lensIncluded",
+        question: "Body only, or with lens?",
+        inputType: "select",
+        options: ["Body only", "With kit lens", "With premium lens", "Multiple lenses"],
+        category: "camera",
+      },
+    ],
+    printer_3d: [
+      {
+        field: "amsIncluded",
+        question: "Includes AMS or enclosure?",
+        inputType: "select",
+        options: ["Printer only", "With AMS", "With enclosure", "Both AMS + enclosure"],
+        category: "printer_3d",
+      },
+    ],
+    laser: [
+      {
+        field: "laserAccessories",
+        question: "Includes rotary or air assist?",
+        inputType: "select",
+        options: ["Machine only", "With rotary", "With air assist", "Both rotary + air assist"],
+        category: "laser",
+      },
+    ],
+    drone: [
+      {
+        field: "droneKit",
+        question: "Drone only, or Fly More combo?",
+        inputType: "select",
+        options: ["Drone only", "Fly More combo", "With extra accessories"],
+        category: "drone",
+      },
+    ],
+    console: [
+      {
+        field: "consoleExtras",
+        question: "Console only, or with games/controllers?",
+        inputType: "select",
+        options: ["Console only", "With extra controller", "With games bundle", "Full setup"],
+        category: "console",
+      },
+    ],
+    laptop: [
+      {
+        field: "laptopAccessories",
+        question: "Laptop only, or with dock/peripherals?",
+        inputType: "select",
+        options: ["Laptop only", "With charger/case", "With dock + peripherals"],
+        category: "laptop",
+      },
+    ],
+    tools: [
+      {
+        field: "toolExtras",
+        question: "Tool only, or with batteries/accessories?",
+        inputType: "select",
+        options: ["Bare tool", "With battery + charger", "Full kit with case"],
+        category: "tools",
+      },
+    ],
+    speaker: [
+      {
+        field: "speakerSetup",
+        question: "Single unit, pair, or full system?",
+        inputType: "select",
+        options: ["Single speaker", "Pair/set", "Full system with sub/receiver"],
+        category: "speaker",
+      },
+    ],
+    instrument: [
+      {
+        field: "instrumentExtras",
+        question: "Instrument only, or with amp/case?",
+        inputType: "select",
+        options: ["Instrument only", "With case", "With amp/case", "Full setup"],
+        category: "instrument",
+      },
+    ],
+    network: [
+      {
+        field: "networkExtras",
+        question: "Unit only, or rack-mounted setup?",
+        inputType: "select",
+        options: ["Single unit", "With rack/accessories", "Full network setup"],
+        category: "network",
+      },
+    ],
+  };
+
+  const available = categoryQuestions[accCategory];
+  if (!available) return [];
+
+  const questions: ConfigClarification[] = [];
+
+  for (const q of available) {
+    // Skip questions whose answer is already evident from the item notes
+    const alreadyAnswered =
+      notes &&
+      ((q.field === "lensIncluded" && /\b(body only|with lens|lens)\b/i.test(notes)) ||
+        (q.field === "amsIncluded" && /\b(ams|enclosure|printer only)\b/i.test(notes)) ||
+        (q.field === "laserAccessories" && /\b(rotary|air assist|machine only)\b/i.test(notes)) ||
+        (q.field === "droneKit" && /\b(fly more|drone only|combo)\b/i.test(notes)) ||
+        (q.field === "consoleExtras" && /\b(console only|with games|controllers)\b/i.test(notes)));
+
+    if (!alreadyAnswered) {
+      questions.push(q);
+    }
+
+    if (questions.length >= 2) break; // cap at 2 questions per run
+  }
+
+  return questions;
 }

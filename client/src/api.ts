@@ -178,6 +178,30 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ transcript, roomType }),
     }),
+
+  parseVoiceWithPhoto: (transcript: string, photo: File, roomType?: string) => {
+    const form = new FormData();
+    form.append("transcript", transcript);
+    if (roomType) form.append("roomType", roomType);
+    form.append("photo", photo);
+    const headers: Record<string, string> = {};
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    return fetch(`${BASE}/items/parse-voice-photo`, { method: "POST", body: form, headers })
+      .then(async res => {
+        if (res.status === 401) { setToken(null); window.dispatchEvent(new Event("moveiq:logout")); }
+        if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error((body as Record<string, unknown>).error as string ?? `${res.status}`); }
+        return res.json() as Promise<{
+          itemName: string;
+          category: string;
+          condition: string;
+          sizeClass: string;
+          notes: string;
+          willingToSell: boolean;
+          keepFlag: boolean;
+          sentimentalFlag: boolean;
+        }>;
+      });
+  },
 };
 
 export interface ProviderTestResult {

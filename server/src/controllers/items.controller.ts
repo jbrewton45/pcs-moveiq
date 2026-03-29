@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import type { Request, Response } from "express";
 import type { ItemStatus } from "../types/domain.js";
 import { bulkDeleteItems, bulkUpdateStatus, createItem, deleteItem, listItemsByProject, listItemsByRoom, updateItem } from "../services/items.service.js";
@@ -7,7 +9,7 @@ import { BulkDeleteSchema, BulkUpdateStatusSchema, CreateItemSchema, UpdateItemS
 import { db } from "../data/database.js";
 import { rowToItem } from "../utils/converters.js";
 import { z } from "zod/v4";
-import { parseVoiceTranscript } from "../services/voice.service.js";
+import { parseVoiceTranscript, parseVoiceWithPhoto } from "../services/voice.service.js";
 
 export function getItems(req: Request, res: Response) {
   const projectId = req.query.projectId as string | undefined;
@@ -114,6 +116,40 @@ export async function parseVoice(req: Request, res: Response) {
   if (!transcript || typeof transcript !== "string" || transcript.trim().length === 0) {
     return res.status(400).json({ error: "transcript is required" });
   }
+  const result = await parseVoiceTranscript(transcript.trim(), roomType);
+  return res.status(200).json(result);
+}
+
+/**
+ * POST /items/parse-voice-photo
+ *
+ * Accepts multipart/form-data with:
+ *   - transcript (string, required): the spoken description of the item
+ *   - roomType   (string, optional): room context hint
+ *   - photo      (file,   optional): image of the item (jpg/png/webp/heic)
+ *
+ * When a photo is provided, the combined vision + transcript parser is used
+ * for richer identification. The uploaded file is ephemeral — it is cleaned
+ * up after parsing and is never stored as the item's permanent photo.
+ */
+export async function parseVoicePhoto(req: Request, res: Response) {
+  const transcript = req.body?.transcript as string | undefined;
+  if (!transcript || typeof transcript !== "string" || transcript.trim().length === 0) {
+    return res.status(400).json({ error: "transcript is required" });
+  }
+  const roomType = req.body?.roomType as string | undefined;
+
+  // If a photo was uploaded, use the combined vision + transcript parser
+  const file = (req as unknown as { file?: { filename: string } }).file;
+  if (file) {
+    const result = await parseVoiceWithPhoto(transcript.trim(), file.filename, roomType);
+    // Clean up the temp photo — it was only for parsing, not permanent item storage
+    const filePath = path.join(process.cwd(), "uploads", file.filename);
+    fs.unlink(filePath, () => {}); // async cleanup, ignore errors
+    return res.status(200).json(result);
+  }
+
+  // No photo — fall back to text-only parse
   const result = await parseVoiceTranscript(transcript.trim(), roomType);
   return res.status(200).json(result);
 }

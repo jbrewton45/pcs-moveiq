@@ -112,6 +112,24 @@ function cleanReasoning(reasoning?: string): string {
   return reasoning.replace(/^\[(Mock|Fallback|OpenAI)\]\s*/, "").replace(/\s*\[Price adjusted:.*?\]/, "");
 }
 
+// ---------- ConfigTierBadge ----------
+
+const CONFIG_TIER_LABELS: Record<string, { label: string; cls: string }> = {
+  "base": { label: "Base Unit", cls: "config-badge--base" },
+  "base_plus": { label: "Base + Accessories", cls: "config-badge--base-plus" },
+  "bundle": { label: "Bundle", cls: "config-badge--bundle" },
+  "full_kit": { label: "Full Kit", cls: "config-badge--full-kit" },
+};
+
+function ConfigTierBadge({ reasoning }: { reasoning: string }) {
+  const tierMatch = reasoning.match(/\b(base|base.?plus|bundle|full.?kit)\b/i);
+  if (!tierMatch) return null;
+  const tier = tierMatch[0].toLowerCase().replace(/\s+/g, "_").replace("-", "_");
+  const info = CONFIG_TIER_LABELS[tier];
+  if (!info) return null;
+  return <span className={`config-badge ${info.cls}`}>{info.label}</span>;
+}
+
 // ---------- ItemReadCard ----------
 
 interface ItemReadCardProps {
@@ -340,7 +358,15 @@ function ItemReadCard({
               <ConfidenceDots value={item.pricingConfidence ?? 0} />
             </div>
             {item.pricingReasoning && <p className="pricing-reasoning">{cleanReasoning(item.pricingReasoning)}</p>}
+            {item.pricingReasoning && /\[(Priced from|Limited comparable)/.test(item.pricingReasoning) && (
+              <p className="pricing-config-note">
+                {item.pricingReasoning.match(/\[([^\]]+)\]/)?.[1]}
+              </p>
+            )}
             <ProviderBadge reasoning={item.pricingReasoning} hasEbayComparables={comparables.some(c => c.source === "ebay")} />
+            {item.pricingReasoning && /\b(base|base_plus|bundle|full.?kit)\b/i.test(item.pricingReasoning) && (
+              <ConfigTierBadge reasoning={item.pricingReasoning} />
+            )}
           </div>
         ) : item.pricingReasoning ? (
           <div className="item-card__pricing item-card__pricing--no-estimate">
@@ -700,6 +726,7 @@ export function RoomDetailView({
 
   // Voice capture toggle
   const [showVoiceCapture, setShowVoiceCapture] = useState(false);
+  const [showWalkthrough, setShowWalkthrough] = useState(false);
 
   // Add item form state
   const [itemName, setItemName] = useState("");
@@ -944,16 +971,34 @@ export function RoomDetailView({
       <section>
         <div className="section-heading-row">
           <h3 className="section-heading">Add an Item</h3>
-          <button
-            className="voice-capture-btn"
-            type="button"
-            onClick={() => setShowVoiceCapture((v) => !v)}
-          >
-            {showVoiceCapture ? "Type Instead" : "🎤 Speak"}
-          </button>
+          <div className="section-heading-row__actions">
+            <button
+              className="voice-capture-btn"
+              type="button"
+              onClick={() => { setShowVoiceCapture(false); setShowWalkthrough(true); }}
+            >
+              Walkthrough
+            </button>
+            <button
+              className="voice-capture-btn"
+              type="button"
+              onClick={() => { setShowWalkthrough(false); setShowVoiceCapture((v) => !v); }}
+            >
+              {showVoiceCapture ? "Type Instead" : "🎤 Speak"}
+            </button>
+          </div>
         </div>
 
-        {showVoiceCapture ? (
+        {showWalkthrough ? (
+          <VoiceCapture
+            projectId={projectId}
+            roomId={roomId}
+            roomType={roomType}
+            walkthrough
+            onItemCreated={() => setRefreshKey((k) => k + 1)}
+            onCancel={() => setShowWalkthrough(false)}
+          />
+        ) : showVoiceCapture ? (
           <VoiceCapture
             projectId={projectId}
             roomId={roomId}

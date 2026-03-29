@@ -8,7 +8,7 @@ import { openaiPricing, openaiWebSearchComparables, isOpenAIAvailable } from "..
 import { isEbayAvailable, ebayComparables } from "../providers/ebay.provider.js";
 import { rederiveRecommendation } from "./items.service.js";
 import { normalizeModel, applyPriceGuardrails } from "../utils/model-normalizer.js";
-import { groupComparablesByConfig } from "../utils/comparable-config.js";
+import { groupComparablesByConfig, generateConfigClarifications } from "../utils/comparable-config.js";
 
 interface PricingResult {
   fastSale: number;
@@ -233,6 +233,43 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
   }
 
   rederiveRecommendation(itemId);
+
+  // Generate config-tier clarification questions when configuration ambiguity
+  // could materially affect pricing. Only written when the item has no existing
+  // clarification answers (i.e. the user hasn't already answered config questions).
+  if (!item.clarificationAnswers) {
+    const configClarifications = generateConfigClarifications(
+      lookupInput.itemName,
+      item.notes,
+      lookupInput.category,
+      realComparables,
+    );
+
+    if (configClarifications.length > 0) {
+      // Merge with any existing identification clarifications rather than replacing them
+      let existingClarifications: unknown[] = [];
+      if (item.pendingClarifications) {
+        try {
+          const parsed = JSON.parse(item.pendingClarifications);
+          if (Array.isArray(parsed)) existingClarifications = parsed;
+        } catch { /* ignore malformed data */ }
+      }
+
+      // Avoid duplicating questions already present from identification
+      const existingFields = new Set(
+        existingClarifications
+          .filter((q): q is { field: string } => typeof q === "object" && q !== null && "field" in q)
+          .map(q => q.field),
+      );
+      const newClarifications = configClarifications.filter(q => !existingFields.has(q.field));
+
+      if (newClarifications.length > 0) {
+        const merged = [...existingClarifications, ...newClarifications];
+        db.prepare("UPDATE items SET pendingClarifications = ?, updatedAt = ? WHERE id = ?")
+          .run(JSON.stringify(merged), now, itemId);
+      }
+    }
+  }
 
   const finalRow = db.prepare("SELECT * FROM items WHERE id = ?").get(itemId);
   return { item: rowToItem(finalRow as Record<string, unknown>), comparables: savedComps };

@@ -2271,3 +2271,117 @@
     border-color: var(--accent, #58a6ff);
   }
 }
+
+/* Voice capture input row (mic + photo side by side) */
+.voice-capture__input-row {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  align-items: center;
+}
+
+.voice-capture__photo-btn {
+  width: 4rem;
+  height: 4rem;
+  border-radius: 50%;
+  border: 2px solid var(--border-color, #d0d7de);
+  background: var(--bg-primary, #fff);
+  font-size: 1.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-capture__photo-preview {
+  margin-bottom: 0.75rem;
+  text-align: center;
+}
+
+.voice-capture__photo-preview img {
+  max-width: 100%;
+  max-height: 12rem;
+  border-radius: 0.5rem;
+  object-fit: contain;
+}
+
+.voice-capture__photo-remove {
+  display: block;
+  margin: 0.35rem auto 0;
+  font-size: 0.75rem;
+  color: #dc2626;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* Walkthrough status */
+.voice-capture__walkthrough-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  margin-bottom: 0.5rem;
+}
+
+.voice-capture__item-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent, #0969da);
+}
+
+/* Section heading actions */
+.section-heading-row__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Config tier badges */
+.config-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  margin-left: 0.25rem;
+}
+
+.config-badge--base {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.config-badge--base-plus {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.config-badge--bundle {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.config-badge--full-kit {
+  background: #fce7f3;
+  color: #be185d;
+}
+
+.pricing-config-note {
+  margin: 0.25rem 0 0;
+  font-size: 0.7rem;
+  color: var(--text-muted, #656d76);
+  font-style: italic;
+}
+
+/* Dark mode additions */
+@media (prefers-color-scheme: dark) {
+  .voice-capture__photo-btn {
+    background: var(--bg-primary, #0d1117);
+    border-color: var(--border-color, #30363d);
+  }
+  .config-badge--base { background: #1e3a5f; color: #93c5fd; }
+  .config-badge--base-plus { background: #312e81; color: #a5b4fc; }
+  .config-badge--bundle { background: #451a03; color: #fcd34d; }
+  .config-badge--full-kit { background: #500724; color: #f9a8d4; }
+  .voice-capture__photo-remove { color: #fca5a5; }
+}
