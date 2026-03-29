@@ -1,0 +1,8 @@
+run = "cd server && npm start"
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+run = ["sh", "-c", "cd server && npm start"]
+build = ["sh", "-c", "bash build.sh"]
