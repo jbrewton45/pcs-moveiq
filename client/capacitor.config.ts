@@ -5,10 +5,8 @@ const config: CapacitorConfig = {
   appName: "PCS MoveIQ",
   webDir: "dist",
   server: {
-    // In production, the app loads from the bundled web assets.
-    // For development, uncomment and set to your dev server URL:
-    // url: "http://10.0.2.2:5173",
-    // cleartext: true,
+    url: "https://pcs-moveiq.replit.app",
+    // cleartext not needed — backend is HTTPS
   },
 };
 
