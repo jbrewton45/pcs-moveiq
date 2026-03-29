@@ -35,10 +35,10 @@ interface VoiceCaptureProps {
   projectId: string;
   roomId: string;
   roomType?: string;
+  walkthrough?: boolean;
   onItemCreated: () => void;
   onCancel: () => void;
-  walkthrough?: boolean;
-  onNextItem?: () => void;
+  onWalkthroughComplete?: (itemIds: string[]) => void;
 }
 
 type CaptureState = "idle" | "recording" | "parsing" | "draft";
@@ -71,9 +71,10 @@ export function VoiceCapture({
   projectId,
   roomId,
   roomType,
+  walkthrough,
   onItemCreated,
   onCancel,
-  walkthrough,
+  onWalkthroughComplete,
 }: VoiceCaptureProps) {
   const [captureState, setCaptureState] = useState<CaptureState>("idle");
   const [finalTranscript, setFinalTranscript] = useState("");
@@ -98,6 +99,7 @@ export function VoiceCapture({
 
   // Walkthrough state
   const [itemCount, setItemCount] = useState(0);
+  const [createdItemIds, setCreatedItemIds] = useState<string[]>([]);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -259,6 +261,7 @@ export function VoiceCapture({
         try { await api.uploadItemPhoto(item.id, photoFile); } catch { /* photo upload failed, item still saved */ }
       }
       if (walkthrough) {
+        setCreatedItemIds(prev => [...prev, item.id]);
         setItemCount((c) => c + 1);
         handleDiscard(); // reset to idle for next item
         onItemCreated(); // trigger list refresh
@@ -304,7 +307,10 @@ export function VoiceCapture({
             <span className="voice-capture__item-count">
               {itemCount} item{itemCount !== 1 ? "s" : ""} added
             </span>
-            <button className="btn-cancel" type="button" onClick={onCancel}>
+            <button className="btn-cancel" type="button" onClick={() => {
+              onWalkthroughComplete?.(createdItemIds);
+              onCancel();
+            }}>
               Done
             </button>
           </div>

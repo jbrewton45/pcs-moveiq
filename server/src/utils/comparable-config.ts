@@ -152,11 +152,14 @@ export function classifyComparable(
 
 /**
  * Classify the user's item description into a config tier.
+ * Accepts optional clarificationAnswers to refine the tier when the item
+ * name and notes alone are ambiguous.
  */
 export function classifyUserItem(
   itemName: string,
   notes?: string,
   category?: string,
+  clarificationAnswers?: Record<string, string>,
 ): ConfigTier {
   const text = `${itemName} ${notes ?? ""}`.toLowerCase();
   let score = 0;
@@ -178,6 +181,35 @@ export function classifyUserItem(
   }
 
   score = Math.min(Math.max(score, 0), 1);
+
+  // Apply clarification answers to refine tier classification
+  if (clarificationAnswers) {
+    for (const [, answer] of Object.entries(clarificationAnswers)) {
+      const a = answer.toLowerCase();
+      // "body only", "printer only", "machine only", "drone only", etc. → strong base signal
+      if (/only$|^bare\b/.test(a)) {
+        score = Math.max(score - 0.3, 0);
+        continue;
+      }
+      // "with kit lens", "with charger/case" → base_plus signal
+      if (/kit lens|charger|case|battery|single/.test(a)) {
+        score += 0.2;
+        continue;
+      }
+      // "fly more combo", "with premium lens", "with AMS", "with rotary", etc.
+      if (/premium|ams|rotary|air assist|fly more|combo|amp|dock|peripherals|games bundle|extra/i.test(a)) {
+        score += 0.4;
+        continue;
+      }
+      // "both AMS + enclosure", "full kit", "full setup", "full system", "multiple lenses"
+      if (/both|full|multiple|complete|everything/i.test(a)) {
+        score += 0.6;
+        continue;
+      }
+    }
+    score = Math.min(Math.max(score, 0), 1);
+  }
+
   if (score < 0.15) return "base";
   if (score < 0.4) return "base_plus";
   if (score < 0.7) return "bundle";
@@ -193,12 +225,13 @@ export function groupComparablesByConfig(
   itemName: string,
   notes?: string,
   category?: string,
+  clarificationAnswers?: Record<string, string>,
 ): ConfigGroupResult {
   if (comparables.length === 0) {
     return { userTier: "base", bestCluster: [], allClassified: [] };
   }
 
-  const userTier = classifyUserItem(itemName, notes, category);
+  const userTier = classifyUserItem(itemName, notes, category, clarificationAnswers);
   const classified = comparables.map(c => classifyComparable(c, itemName, category));
 
   // Group by tier

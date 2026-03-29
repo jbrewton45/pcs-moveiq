@@ -164,6 +164,18 @@ export const api = {
       body: JSON.stringify({ answers }),
     }),
 
+  batchIdentifyPrice: (itemIds: string[]) =>
+    request<{
+      results: Array<{
+        itemId: string;
+        status: "complete" | "no_estimate" | "error";
+        item?: Item;
+      }>;
+    }>("/items/batch-identify-price", {
+      method: "POST",
+      body: JSON.stringify({ itemIds }),
+    }),
+
   parseVoiceTranscript: (transcript: string, roomType?: string) =>
     request<{
       itemName: string;

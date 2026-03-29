@@ -86,13 +86,15 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     ...(webResult ?? []),
   ];
 
-  // Group comparables by configuration match
+  // Group comparables by configuration match, incorporating clarification answers
   const configResult = groupComparablesByConfig(
     realComparables,
     lookupInput.itemName,
     item.notes,
     lookupInput.category,
+    clarificationAnswers,
   );
+  const answersUsed = clarificationAnswers && Object.keys(clarificationAnswers).length > 0;
 
   // Use best-matching cluster for cross-validation instead of all comps
   const pricingComps = configResult.bestCluster.length > 0
@@ -157,6 +159,10 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
       result.reasoning += ` [${configResult.adjustmentNote}]`;
     }
 
+    if (answersUsed) {
+      result.reasoning += " [Configuration refined by your answers]";
+    }
+
     // Cap pricing confidence by identification confidence
     if (item.identificationConfidence != null) {
       result.confidence = Math.min(result.confidence, item.identificationConfidence + 0.2);
@@ -182,6 +188,10 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     // Append config adjustment note if present
     if (configResult.adjustmentNote) {
       result.reasoning += ` [${configResult.adjustmentNote}]`;
+    }
+
+    if (answersUsed) {
+      result.reasoning += " [Configuration refined by your answers]";
     }
 
     // Apply model guardrails

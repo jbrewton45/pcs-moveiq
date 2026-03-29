@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import type { Request, Response } from "express";
-import type { ItemStatus } from "../types/domain.js";
+import type { Item, ItemStatus } from "../types/domain.js";
 import { bulkDeleteItems, bulkUpdateStatus, createItem, deleteItem, listItemsByProject, listItemsByRoom, updateItem } from "../services/items.service.js";
 import { getProjectById } from "../services/projects.service.js";
 import { getRoomById } from "../services/rooms.service.js";
@@ -10,6 +10,8 @@ import { db } from "../data/database.js";
 import { rowToItem } from "../utils/converters.js";
 import { z } from "zod/v4";
 import { parseVoiceTranscript, parseVoiceWithPhoto } from "../services/voice.service.js";
+import { identifyItem } from "../services/identification.service.js";
+import { generatePricing } from "../services/pricing.service.js";
 
 export function getItems(req: Request, res: Response) {
   const projectId = req.query.projectId as string | undefined;
@@ -152,4 +154,63 @@ export async function parseVoicePhoto(req: Request, res: Response) {
   // No photo — fall back to text-only parse
   const result = await parseVoiceTranscript(transcript.trim(), roomType);
   return res.status(200).json(result);
+}
+
+/**
+ * POST /items/batch-identify-price
+ *
+ * Accepts a JSON body: { itemIds: string[] }
+ * Capped at 20 items per batch. For each item, runs identification (if not
+ * yet identified) then pricing, and returns a per-item status summary.
+ */
+export async function batchIdentifyPrice(req: Request, res: Response) {
+  const { itemIds } = req.body as { itemIds?: string[] };
+  if (!Array.isArray(itemIds) || itemIds.length === 0) {
+    return res.status(400).json({ error: "itemIds array is required" });
+  }
+
+  // Cap at 20 items per batch to prevent abuse
+  const ids = itemIds.slice(0, 20);
+
+  const results: Array<{
+    itemId: string;
+    status: "complete" | "no_estimate" | "error";
+    item?: Item;
+  }> = [];
+
+  // Process sequentially to avoid overwhelming API rate limits
+  for (const id of ids) {
+    try {
+      // Step 1: Identify (if not already identified)
+      const itemRow = db.prepare("SELECT * FROM items WHERE id = ?").get(id);
+      if (!itemRow) {
+        results.push({ itemId: id, status: "error" });
+        continue;
+      }
+      const item = rowToItem(itemRow as Record<string, unknown>);
+
+      if (item.identificationStatus === "NONE") {
+        await identifyItem(id);
+      }
+
+      // Step 2: Price
+      const pricingResult = await generatePricing(id);
+      if (!pricingResult) {
+        results.push({ itemId: id, status: "error" });
+        continue;
+      }
+
+      const finalItem = pricingResult.item;
+      results.push({
+        itemId: id,
+        status: finalItem.priceFairMarket != null ? "complete" : "no_estimate",
+        item: finalItem,
+      });
+    } catch (err) {
+      console.error(`Batch process failed for item ${id}:`, err instanceof Error ? err.message : err);
+      results.push({ itemId: id, status: "error" });
+    }
+  }
+
+  return res.status(200).json({ results });
 }

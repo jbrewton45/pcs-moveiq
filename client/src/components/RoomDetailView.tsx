@@ -728,6 +728,13 @@ export function RoomDetailView({
   const [showVoiceCapture, setShowVoiceCapture] = useState(false);
   const [showWalkthrough, setShowWalkthrough] = useState(false);
 
+  // Batch identify/price state
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [batchResults, setBatchResults] = useState<Array<{
+    itemId: string;
+    status: "queued" | "complete" | "no_estimate" | "error";
+  }> | null>(null);
+
   // Add item form state
   const [itemName, setItemName] = useState("");
   const [category, setCategory] = useState("");
@@ -879,6 +886,29 @@ export function RoomDetailView({
     setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
   }
 
+  async function handleWalkthroughComplete(itemIds: string[]) {
+    if (itemIds.length === 0) return;
+    setShowWalkthrough(false);
+    setRefreshKey(k => k + 1);
+
+    // Initialize batch status
+    setBatchResults(itemIds.map(id => ({ itemId: id, status: "queued" as const })));
+    setBatchProcessing(true);
+
+    try {
+      const response = await api.batchIdentifyPrice(itemIds);
+      setBatchResults(response.results.map(r => ({
+        itemId: r.itemId,
+        status: r.status,
+      })));
+      setRefreshKey(k => k + 1); // refresh items to show new pricing
+    } catch {
+      setBatchResults(itemIds.map(id => ({ itemId: id, status: "error" as const })));
+    } finally {
+      setBatchProcessing(false);
+    }
+  }
+
   const showBulkBar = selectMode && selectedIds.size > 0;
   const roomWeight = items.reduce((sum, i) => sum + (i.weightLbs ?? 0), 0);
 
@@ -927,6 +957,44 @@ export function RoomDetailView({
             </div>
           )}
         </div>
+
+        {batchResults && (
+          <div className="batch-status">
+            <div className="batch-status__header">
+              <h4 className="batch-status__title">
+                {batchProcessing ? "Identifying & Pricing Items..." : "Batch Processing Complete"}
+              </h4>
+              {!batchProcessing && (
+                <button className="btn-cancel" type="button" onClick={() => setBatchResults(null)}>
+                  Dismiss
+                </button>
+              )}
+            </div>
+            <div className="batch-status__items">
+              {batchResults.map((r, i) => (
+                <div key={r.itemId} className={`batch-status__item batch-status__item--${r.status}`}>
+                  <span className="batch-status__item-num">#{i + 1}</span>
+                  <span className="batch-status__item-status">
+                    {r.status === "queued" ? "Queued..." :
+                     r.status === "complete" ? "✓ Priced" :
+                     r.status === "no_estimate" ? "No estimate" :
+                     "✗ Error"}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {batchProcessing && (
+              <div className="batch-status__progress">
+                <div className="batch-status__bar">
+                  <div
+                    className="batch-status__bar-fill"
+                    style={{ width: `${(batchResults.filter(r => r.status !== "queued").length / batchResults.length) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {loading ? (
           <p className="loading">Loading items...</p>
@@ -997,6 +1065,7 @@ export function RoomDetailView({
             walkthrough
             onItemCreated={() => setRefreshKey((k) => k + 1)}
             onCancel={() => setShowWalkthrough(false)}
+            onWalkthroughComplete={handleWalkthroughComplete}
           />
         ) : showVoiceCapture ? (
           <VoiceCapture
