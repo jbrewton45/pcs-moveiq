@@ -33,12 +33,13 @@ app.use("/api/rooms", requireAuth, roomsRouter);
 app.use("/api/items", requireAuth, itemsRouter);
 app.use("/api/providers", providersRouter);
 
-// Serve client build if available (production / Replit)
-const clientDistPath = path.join(process.cwd(), "..", "client", "dist");
+// Serve the built React client
+// __dirname is server/dist at runtime, so ../../client/dist is always correct
+const clientDistPath = path.resolve(__dirname, "../../client/dist");
 if (fs.existsSync(clientDistPath)) {
   app.use(express.static(clientDistPath));
-  // SPA catch-all: serve index.html for non-API routes
-  app.get("*", (_req, res) => {
+  // SPA catch-all: serve index.html for all non-API routes (app.use, not app.get("*") — Express 5 compat)
+  app.use((_req, res) => {
     res.sendFile(path.join(clientDistPath, "index.html"));
   });
 }

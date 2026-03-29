@@ -4,5 +4,41 @@ run = "cd server && npm start"
 channel = "stable-25_05"
 
 [deployment]
-run = ["sh", "-c", "cd server && npm start"]
-build = ["sh", "-c", "bash build.sh"]
+run = ["bash", "run.sh"]
+build = ["bash", "build.sh"]
+deploymentTarget = "vm"
+
+[agent]
+expertMode = true
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash start.sh"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[ports]]
+localPort = 4000
+externalPort = 3000
+
+[[ports]]
+localPort = 5000
+externalPort = 80

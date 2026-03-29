@@ -3,8 +3,8 @@ import { app } from "./app.js";
 
 dotenv.config();
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`PCS MoveIQ server running on http://localhost:${PORT}`);
+app.listen(Number(PORT), "0.0.0.0", () => {
+  console.log(`PCS MoveIQ server running on http://0.0.0.0:${PORT}`);
 });
