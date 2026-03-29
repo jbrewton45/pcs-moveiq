@@ -4,7 +4,7 @@ import type { ComparableCandidate, ComparableLookupInput } from "../types/provid
 import { rowToItem, rowToComparable } from "../utils/converters.js";
 import { createId } from "../utils/id.js";
 import { claudePricing, isClaudeAvailable } from "../providers/claude.provider.js";
-import { openaiPricing, isOpenAIAvailable } from "../providers/openai.provider.js";
+import { openaiPricing, openaiWebSearchComparables, isOpenAIAvailable } from "../providers/openai.provider.js";
 import { isEbayAvailable, ebayComparables } from "../providers/ebay.provider.js";
 import { rederiveRecommendation } from "./items.service.js";
 import { normalizeModel, applyPriceGuardrails } from "../utils/model-normalizer.js";
@@ -72,10 +72,18 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
     ? ebayComparables(lookupInput)
     : Promise.resolve(null);
 
-  const [aiResult, ebayResult] = await Promise.all([runAIPricing(), ebayPromise]);
+  // Web search for comparables when OpenAI is available
+  const webSearchPromise: Promise<ComparableCandidate[] | null> = isOpenAIAvailable()
+    ? openaiWebSearchComparables(lookupInput)
+    : Promise.resolve(null);
 
-  // Only eBay comparables are real source-backed data
-  const realComparables: ComparableCandidate[] = ebayResult ?? [];
+  const [aiResult, ebayResult, webResult] = await Promise.all([runAIPricing(), ebayPromise, webSearchPromise]);
+
+  // Combine all real source-backed comparables (eBay API + web search)
+  const realComparables: ComparableCandidate[] = [
+    ...(ebayResult ?? []),
+    ...(webResult ?? []),
+  ];
 
   // Determine if we have enough evidence to provide pricing
   const hasAI = aiResult != null;

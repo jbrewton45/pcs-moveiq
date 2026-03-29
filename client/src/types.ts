@@ -14,7 +14,7 @@ export type MoveType = "CONUS" | "OCONUS" | "JAPAN" | "EUROPE" | "STORAGE_ONLY";
 
 export type IdentificationStatus = "NONE" | "SUGGESTED" | "CONFIRMED" | "EDITED";
 
-export type ComparableSource = "claude" | "openai" | "ebay" | "mock";
+export type ComparableSource = "claude" | "openai" | "ebay" | "web" | "mock";
 
 export interface Comparable {
   id: string;

@@ -1768,6 +1768,10 @@
   line-height: 1.4;
 }
 .comp-source-badge--ebay { background: #dbeafe; color: #1d4ed8; }
+.comp-source-badge--web {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
 .comp-source-badge--claude { background: rgba(170, 59, 255, 0.1); color: #7c3aed; }
 .comp-source-badge--mock { background: var(--color-border, #e0e0e0); color: inherit; opacity: 0.6; }
 
@@ -2121,5 +2125,9 @@
   .comp-source-badge--openai {
     background: #0d2e23;
     color: #10a37f;
+  }
+  .comp-source-badge--web {
+    background: #1e2a3a;
+    color: #60a5fa;
   }
 }

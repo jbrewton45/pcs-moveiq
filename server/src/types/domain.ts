@@ -143,7 +143,7 @@ export interface Item {
   updatedAt: string;
 }
 
-export type ComparableSource = "claude" | "openai" | "ebay" | "mock";
+export type ComparableSource = "claude" | "openai" | "ebay" | "web" | "mock";
 
 export interface Comparable {
   id: string;

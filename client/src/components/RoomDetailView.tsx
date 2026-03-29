@@ -86,6 +86,7 @@ const SOURCE_LABEL: Record<string, string> = {
   claude: "Claude",
   openai: "OpenAI",
   ebay: "eBay",
+  web: "Web",
   mock: "Mock",
 };
 
@@ -96,7 +97,7 @@ function SourceSummary({ comparables }: { comparables: Comparable[] }) {
   }
   if (counts.size < 2) return null;
   const parts: string[] = [];
-  for (const src of ["ebay", "claude", "openai"] as ComparableSource[]) {
+  for (const src of ["ebay", "web", "claude", "openai"] as ComparableSource[]) {
     const n = counts.get(src);
     if (n) parts.push(`${n} from ${SOURCE_LABEL[src]}`);
   }

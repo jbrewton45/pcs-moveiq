@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import fs from "fs";
 import path from "path";
-import type { ComparableCandidate } from "../types/providers.js";
+import type { ComparableCandidate, ComparableLookupInput } from "../types/providers.js";
 import type { ClarificationQuestion } from "../types/domain.js";
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
@@ -241,6 +241,99 @@ Rules:
     return parsed as PricingOutput;
   } catch (err) {
     console.error("OpenAI pricing failed:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * Use OpenAI Responses API with web_search_preview to find real
+ * comparable listings for an item on the used market.
+ */
+export async function openaiWebSearchComparables(
+  input: ComparableLookupInput,
+): Promise<ComparableCandidate[] | null> {
+  const api = getClient();
+  if (!api) return null;
+
+  try {
+    const searchTerms = input.brand && input.model
+      ? `${input.brand} ${input.model}`
+      : input.brand
+      ? `${input.brand} ${input.itemName}`
+      : input.itemName;
+
+    const conditionText = input.condition.toLowerCase().replace("_", " ");
+
+    const response = await api.responses.create({
+      model: "gpt-4o",
+      tools: [{ type: "web_search_preview" }],
+      input: `Search for "${searchTerms}" used ${conditionText} for sale in the US. Find 5-8 real listings or recently sold items from sites like eBay, Facebook Marketplace, Mercari, Swappa, or other resale platforms.
+
+For each listing found, extract:
+- title: the listing title
+- url: the actual URL of the listing
+- price: the asking or sold price in USD (number only)
+- soldStatus: "SOLD" if it already sold, "LISTED" if still available
+
+Return ONLY a JSON array of objects. Example:
+[
+  {"title": "Sony A7R III Body Only - Used", "url": "https://www.ebay.com/itm/123", "price": 1050, "soldStatus": "SOLD"},
+  {"title": "...", "url": "...", "price": 900, "soldStatus": "LISTED"}
+]
+
+Rules:
+- Only include listings with real URLs you found in search results
+- Only include listings where you can determine a price
+- Prices must be in USD as numbers (no $ signs)
+- Return ONLY the JSON array, nothing else`,
+    });
+
+    // Extract text from the response
+    let text = "";
+    for (const item of response.output) {
+      if (item.type === "message") {
+        for (const content of item.content) {
+          if (content.type === "output_text") {
+            text = content.text;
+          }
+        }
+      }
+    }
+
+    if (!text) return null;
+
+    // Parse JSON array from response
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return null;
+
+    const parsed = JSON.parse(jsonMatch[0]) as Array<{
+      title?: string;
+      url?: string;
+      price?: number;
+      soldStatus?: string;
+    }>;
+
+    if (!Array.isArray(parsed)) return null;
+
+    // Filter and normalize results
+    const results: ComparableCandidate[] = [];
+    for (const item of parsed) {
+      const price = typeof item.price === "number" ? item.price : parseFloat(String(item.price));
+      if (!item.title || isNaN(price) || price <= 0) continue;
+      // Only include items with real URLs
+      if (!item.url || !item.url.startsWith("http")) continue;
+      results.push({
+        title: item.title,
+        source: "web",
+        url: item.url,
+        price: Math.round(price),
+        soldStatus: item.soldStatus ?? "LISTED",
+      });
+    }
+
+    return results.length > 0 ? results : null;
+  } catch (err) {
+    console.error("OpenAI web search failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }
