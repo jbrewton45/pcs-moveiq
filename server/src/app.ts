@@ -2,10 +2,12 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import { healthRouter } from "./routes/health.routes.js";
+import { authRouter } from "./routes/auth.routes.js";
 import { projectsRouter } from "./routes/projects.routes.js";
 import { roomsRouter } from "./routes/rooms.routes.js";
 import { itemsRouter } from "./routes/items.routes.js";
 import { providersRouter } from "./routes/providers.routes.js";
+import { requireAuth } from "./middleware/auth.middleware.js";
 
 export const app = express();
 
@@ -22,8 +24,12 @@ app.get("/", (_req, res) => {
   });
 });
 
+// Public routes
 app.use("/api/health", healthRouter);
-app.use("/api/projects", projectsRouter);
-app.use("/api/rooms", roomsRouter);
-app.use("/api/items", itemsRouter);
+app.use("/api/auth", authRouter);
+
+// Protected routes — require authentication
+app.use("/api/projects", requireAuth, projectsRouter);
+app.use("/api/rooms", requireAuth, roomsRouter);
+app.use("/api/items", requireAuth, itemsRouter);
 app.use("/api/providers", providersRouter);

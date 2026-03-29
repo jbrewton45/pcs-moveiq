@@ -1,12 +1,34 @@
-import type { Project, Room, Item, Comparable } from "./types";
+import type { Project, Room, Item, Comparable, UserPublic } from "./types";
 
 const BASE = "/api";
 
+let authToken: string | null = localStorage.getItem("moveiq_token");
+
+export function setToken(token: string | null) {
+  authToken = token;
+  if (token) localStorage.setItem("moveiq_token", token);
+  else localStorage.removeItem("moveiq_token");
+}
+
+export function getToken(): string | null {
+  return authToken;
+}
+
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+  return headers;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     ...options,
   });
+  if (res.status === 401) {
+    setToken(null);
+    window.dispatchEvent(new Event("moveiq:logout"));
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error((body as Record<string, unknown>).error as string ?? `${res.status} ${res.statusText}`);
@@ -15,14 +37,32 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // Auth
+  signup: (email: string, password: string, displayName: string) =>
+    request<{ user: UserPublic; token: string }>("/auth/signup", {
+      method: "POST", body: JSON.stringify({ email, password, displayName }),
+    }),
+
+  login: (email: string, password: string) =>
+    request<{ user: UserPublic; token: string }>("/auth/login", {
+      method: "POST", body: JSON.stringify({ email, password }),
+    }),
+
+  getMe: () => request<UserPublic>("/auth/me"),
+
+  updateMe: (data: { displayName?: string; branchOfService?: string | null; dutyStation?: string | null; preferredMarketplace?: string | null }) =>
+    request<UserPublic>("/auth/me", { method: "PUT", body: JSON.stringify(data) }),
+
+  // Health
   getHealth: () => request<{ ok: boolean }>("/health"),
 
+  // Projects
   listProjects: () => request<Project[]>("/projects"),
 
   getProject: (id: string) => request<Project>(`/projects/${id}`),
 
   createProject: (
-    data: Omit<Project, "id" | "createdAt" | "updatedAt">
+    data: Omit<Project, "id" | "userId" | "createdAt" | "updatedAt">
   ) => request<Project>("/projects", { method: "POST", body: JSON.stringify(data) }),
 
   listRooms: (projectId: string) =>
@@ -48,18 +88,18 @@ export const api = {
   ) => request<Item>(`/items/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
   deleteItem: (id: string) =>
-    fetch(`${BASE}/items/${id}`, { method: "DELETE" }).then((res) => {
+    fetch(`${BASE}/items/${id}`, { method: "DELETE", headers: authHeaders() }).then((res) => {
       if (!res.ok) throw new Error("Failed to delete item");
     }),
 
   getProjectSummary: (id: string) =>
     request<Record<string, number>>(`/projects/${id}/summary`),
 
-  updateProject: (id: string, data: Omit<Partial<Omit<Project, "id" | "createdAt" | "updatedAt">>, "weightAllowanceLbs"> & { weightAllowanceLbs?: number | null }) =>
+  updateProject: (id: string, data: Omit<Partial<Omit<Project, "id" | "userId" | "createdAt" | "updatedAt">>, "weightAllowanceLbs"> & { weightAllowanceLbs?: number | null }) =>
     request<Project>(`/projects/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
   deleteProject: (id: string) =>
-    fetch(`${BASE}/projects/${id}`, { method: "DELETE" }).then(res => {
+    fetch(`${BASE}/projects/${id}`, { method: "DELETE", headers: authHeaders() }).then(res => {
       if (!res.ok) throw new Error("Failed to delete project");
     }),
 
@@ -67,7 +107,7 @@ export const api = {
     request<Room>(`/rooms/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
   deleteRoom: (id: string) =>
-    fetch(`${BASE}/rooms/${id}`, { method: "DELETE" }).then(res => {
+    fetch(`${BASE}/rooms/${id}`, { method: "DELETE", headers: authHeaders() }).then(res => {
       if (!res.ok) throw new Error("Failed to delete room");
     }),
 
@@ -86,7 +126,9 @@ export const api = {
   uploadItemPhoto: (id: string, file: File) => {
     const form = new FormData();
     form.append("photo", file);
-    return fetch(`${BASE}/items/${id}/photo`, { method: "POST", body: form })
+    const headers: Record<string, string> = {};
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    return fetch(`${BASE}/items/${id}/photo`, { method: "POST", body: form, headers })
       .then(async res => {
         if (!res.ok) throw new Error("Upload failed");
         return res.json() as Promise<Item>;

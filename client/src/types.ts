@@ -1,3 +1,15 @@
+export interface UserPublic {
+  id: string;
+  email: string;
+  displayName: string;
+  branchOfService?: string;
+  dutyStation?: string;
+  preferredMarketplace?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+}
+
 export type MoveType = "CONUS" | "OCONUS" | "JAPAN" | "EUROPE" | "STORAGE_ONLY";
 
 export type IdentificationStatus = "NONE" | "SUGGESTED" | "CONFIRMED" | "EDITED";
@@ -51,6 +63,7 @@ export type ItemStatus =
 
 export interface Project {
   id: string;
+  userId: string;
   projectName: string;
   currentLocation: string;
   destination: string;

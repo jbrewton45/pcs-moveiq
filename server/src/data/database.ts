@@ -11,6 +11,19 @@ db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    passwordHash TEXT NOT NULL,
+    displayName TEXT NOT NULL,
+    branchOfService TEXT,
+    dutyStation TEXT,
+    preferredMarketplace TEXT,
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL,
+    lastLoginAt TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     projectName TEXT NOT NULL,
@@ -53,6 +66,11 @@ db.exec(`
     updatedAt TEXT NOT NULL
   );
 `);
+
+// Migration: add userId to projects
+try {
+  db.exec("ALTER TABLE projects ADD COLUMN userId TEXT REFERENCES users(id)");
+} catch { /* exists */ }
 
 // Migration: add weightLbs column
 try {

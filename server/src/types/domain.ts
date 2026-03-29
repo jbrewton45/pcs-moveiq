@@ -47,8 +47,34 @@ export interface RecommendationResult {
   reason: string;
 }
 
+export interface User {
+  id: string;
+  email: string;
+  passwordHash: string;
+  displayName: string;
+  branchOfService?: string;
+  dutyStation?: string;
+  preferredMarketplace?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+}
+
+export interface UserPublic {
+  id: string;
+  email: string;
+  displayName: string;
+  branchOfService?: string;
+  dutyStation?: string;
+  preferredMarketplace?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+}
+
 export interface Project {
   id: string;
+  userId: string;
   projectName: string;
   currentLocation: string;
   destination: string;
