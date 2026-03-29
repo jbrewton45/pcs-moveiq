@@ -1,7 +1,7 @@
 run = "cd server && npm start"
 
 [nix]
-channel = "stable-24_05"
+channel = "stable-25_05"
 
 [deployment]
 run = ["sh", "-c", "cd server && npm start"]
