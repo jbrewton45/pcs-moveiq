@@ -15,31 +15,31 @@ interface IdentificationResult {
   clarifications?: import("../types/domain.js").ClarificationQuestion[];
 }
 
-// Mock provider — returns suggestions based on existing item data
+// Mock provider — returns unverified suggestions based on existing item data only.
+// Used only when no AI provider is configured or as a last-resort fallback.
 function mockIdentify(item: Item): IdentificationResult {
   const categoryMap: Record<string, { brand?: string; model?: string; confidence: number }> = {
-    "Furniture": { brand: undefined, model: undefined, confidence: 0.7 },
-    "Electronics": { brand: "Various", model: undefined, confidence: 0.6 },
-    "Appliance": { brand: "Various", model: undefined, confidence: 0.65 },
-    "Keepsake": { brand: undefined, model: undefined, confidence: 0.5 },
-    "Media": { brand: undefined, model: undefined, confidence: 0.55 },
-    "Linens": { brand: undefined, model: undefined, confidence: 0.6 },
-    "Decor": { brand: undefined, model: undefined, confidence: 0.5 },
+    "Furniture": { brand: undefined, model: undefined, confidence: 0.3 },
+    "Electronics": { brand: "Various", model: undefined, confidence: 0.3 },
+    "Appliance": { brand: "Various", model: undefined, confidence: 0.3 },
+    "Keepsake": { brand: undefined, model: undefined, confidence: 0.2 },
+    "Media": { brand: undefined, model: undefined, confidence: 0.25 },
+    "Linens": { brand: undefined, model: undefined, confidence: 0.3 },
+    "Decor": { brand: undefined, model: undefined, confidence: 0.2 },
   };
 
-  const catInfo = categoryMap[item.category] ?? { confidence: 0.4 };
+  const catInfo = categoryMap[item.category] ?? { confidence: 0.2 };
   const hasPhoto = !!item.photoPath;
-  const confidenceBoost = hasPhoto ? 0.15 : 0;
+  // Modest boost for having a photo, but cap well below AI-level confidence
+  const confidenceBoost = hasPhoto ? 0.05 : 0;
 
   return {
     identifiedName: item.itemName,
     identifiedCategory: item.category,
     identifiedBrand: catInfo.brand,
     identifiedModel: catInfo.model,
-    confidence: Math.min(catInfo.confidence + confidenceBoost, 0.95),
-    reasoning: hasPhoto
-      ? `Identified based on item details and attached photo. Category "${item.category}" recognized with photo context.`
-      : `Identified based on item name and category. No photo available — confidence is lower. Consider adding a photo for better results.`,
+    confidence: Math.min(catInfo.confidence + confidenceBoost, 0.3),
+    reasoning: "This is an unverified estimate based on the item name and category. For accurate identification, ensure an AI provider (Claude or OpenAI) is configured.",
     isSpecialty: false,
     clarifications: [],
   };

@@ -189,7 +189,7 @@ export async function openaiPricing(input: PricingInput): Promise<PricingOutput 
 
     const response = await api.chat.completions.create({
       model: "gpt-4o",
-      max_tokens: 800,
+      max_tokens: 600,
       messages: [
         {
           role: "user",
@@ -201,7 +201,7 @@ Condition: ${input.condition}
 Size: ${input.sizeClass}
 ${input.notes ? `Notes: ${input.notes}` : ""}${clarificationContext}${modelEmphasis}
 
-Estimate realistic resale prices in USD. Return a JSON object:
+Estimate realistic resale prices in USD based on your knowledge of the US secondhand market. Return a JSON object:
 {
   "fastSale": number (price for a quick sale within 1-3 days),
   "fairMarket": number (fair price with 1-2 weeks of selling time),
@@ -209,17 +209,11 @@ Estimate realistic resale prices in USD. Return a JSON object:
   "confidence": 0.0 to 1.0 (how confident you are in these estimates),
   "reasoning": "brief explanation of your pricing logic",
   "suggestedChannel": "best selling channel (e.g. Facebook Marketplace, OfferUp, Base Yard Sale)",
-  "saleSpeedBand": "FAST or MODERATE or SLOW",
-  "comparables": [
-    { "title": "similar item listing title", "source": "openai", "price": number, "soldStatus": "SOLD or LISTED" },
-    { "title": "...", "source": "openai", "price": number, "soldStatus": "..." },
-    { "title": "...", "source": "openai", "price": number, "soldStatus": "..." }
-  ]
+  "saleSpeedBand": "FAST or MODERATE or SLOW"
 }
 
 Rules:
-- Prices should be realistic US resale prices
-- comparables should be realistic examples of what similar items sell for
+- Prices should be realistic US resale prices based on your training data
 - confidence should be lower for generic items, higher for well-known branded items
 - saleSpeedBand: FAST for items under $50, MODERATE for $50-300, SLOW for $300+
 - Return ONLY the JSON object`,
@@ -231,7 +225,7 @@ Rules:
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
-    const parsed = JSON.parse(jsonMatch[0]) as PricingOutput;
+    const parsed = JSON.parse(jsonMatch[0]) as Omit<PricingOutput, "comparables"> & { comparables?: ComparableCandidate[] };
 
     // Clamp confidence
     parsed.confidence = Math.max(0.1, Math.min(0.95, parsed.confidence));
@@ -241,14 +235,10 @@ Rules:
     parsed.fairMarket = Math.max(1, Math.round(parsed.fairMarket));
     parsed.reach = Math.max(1, Math.round(parsed.reach));
 
-    // Ensure all comparables have source: "openai"
-    if (Array.isArray(parsed.comparables)) {
-      parsed.comparables = parsed.comparables.map(c => ({ ...c, source: "openai" as const }));
-    } else {
-      parsed.comparables = [];
-    }
+    // OpenAI must not generate fake comparable listings — comparables come from eBay only
+    parsed.comparables = [];
 
-    return parsed;
+    return parsed as PricingOutput;
   } catch (err) {
     console.error("OpenAI pricing failed:", err instanceof Error ? err.message : err);
     return null;

@@ -60,16 +60,16 @@ function ConfidenceDots({ value }: { value: number }) {
 
 function ProviderBadge({ reasoning, hasEbayComparables }: { reasoning?: string; hasEbayComparables?: boolean }) {
   if (!reasoning) return null;
-  const isMock = reasoning.startsWith("[Mock]") || reasoning.startsWith("[Fallback]");
   const isOpenAI = reasoning.startsWith("[OpenAI]");
+  const isEbayOnly = reasoning.startsWith("Pricing derived from");
   let cls: string;
   let text: string;
-  if (isMock) {
-    cls = "provider-badge--mock";
-    text = "Mock estimate";
+  if (isEbayOnly) {
+    cls = "provider-badge--ebay-enhanced";
+    text = "eBay data";
   } else if (isOpenAI) {
     cls = "provider-badge--openai";
-    text = "OpenAI-powered";
+    text = hasEbayComparables ? "OpenAI + eBay data" : "OpenAI-powered";
   } else if (hasEbayComparables) {
     cls = "provider-badge--ebay-enhanced";
     text = "AI + eBay data";
@@ -96,7 +96,7 @@ function SourceSummary({ comparables }: { comparables: Comparable[] }) {
   }
   if (counts.size < 2) return null;
   const parts: string[] = [];
-  for (const src of ["ebay", "claude", "openai", "mock"] as ComparableSource[]) {
+  for (const src of ["ebay", "claude", "openai"] as ComparableSource[]) {
     const n = counts.get(src);
     if (n) parts.push(`${n} from ${SOURCE_LABEL[src]}`);
   }
@@ -107,7 +107,7 @@ function SourceSummary({ comparables }: { comparables: Comparable[] }) {
 
 function cleanReasoning(reasoning?: string): string {
   if (!reasoning) return "";
-  return reasoning.replace(/^\[(Mock|Fallback|OpenAI)\]\s*/, "");
+  return reasoning.replace(/^\[(Mock|Fallback|OpenAI)\]\s*/, "").replace(/\s*\[Price adjusted:.*?\]/, "");
 }
 
 // ---------- ItemReadCard ----------
@@ -312,7 +312,7 @@ function ItemReadCard({
           );
         })()}
 
-        {item.priceFairMarket != null && (
+        {item.priceFairMarket != null ? (
           <div className="item-card__pricing">
             <div className="pricing-bands">
               <div className="pricing-band">
@@ -340,7 +340,12 @@ function ItemReadCard({
             {item.pricingReasoning && <p className="pricing-reasoning">{cleanReasoning(item.pricingReasoning)}</p>}
             <ProviderBadge reasoning={item.pricingReasoning} hasEbayComparables={comparables.some(c => c.source === "ebay")} />
           </div>
-        )}
+        ) : item.pricingReasoning ? (
+          <div className="item-card__pricing item-card__pricing--no-estimate">
+            <p className="pricing-no-estimate">No trustworthy estimate available</p>
+            <p className="pricing-reasoning">{item.pricingReasoning}</p>
+          </div>
+        ) : null}
 
         {comparables.length > 0 && (
           <div className="comp-list">
@@ -387,7 +392,7 @@ function ItemReadCard({
             )}
             {identifyError && <p className="item-error-text">Could not analyze this item. Try again later.</p>}
             <button className="btn-action-sm" disabled={pricing} onClick={() => onPricing(item.id)}>
-              {pricing ? "Getting pricing..." : item.priceFairMarket != null ? "Refresh Pricing" : "Get Pricing"}
+              {pricing ? "Getting pricing..." : (item.priceFairMarket != null || item.pricingReasoning) ? "Retry Pricing" : "Get Pricing"}
             </button>
             {pricingError && <p className="item-error-text">Could not get pricing. Try again later.</p>}
           </div>

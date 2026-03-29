@@ -37,6 +37,9 @@ function getConfidenceTier(confidence: number | undefined, hasEbay: boolean): "H
   let tier: "HIGH" | "MEDIUM" | "LOW" =
     (confidence ?? 0) >= 0.6 ? "HIGH" :
     (confidence ?? 0) >= 0.4 ? "MEDIUM" : "LOW";
+  // TODO: The eBay bump below assumes any eBay comparables validate the AI price.
+  // In future, this should only apply when the eBay median is within a reasonable
+  // range of the AI-derived fairMarket price (e.g. within 50%), not unconditionally.
   if (hasEbay && tier === "LOW") tier = "MEDIUM";
   else if (hasEbay && tier === "MEDIUM") tier = "HIGH";
   return tier;
