@@ -8,6 +8,7 @@ import { projectsRouter } from "./routes/projects.routes.js";
 import { roomsRouter } from "./routes/rooms.routes.js";
 import { itemsRouter } from "./routes/items.routes.js";
 import { providersRouter } from "./routes/providers.routes.js";
+import { ebayRouter } from "./routes/ebay.routes.js";
 import { requireAuth } from "./middleware/auth.middleware.js";
 
 export const app = express();
@@ -32,6 +33,9 @@ app.use("/api/projects", requireAuth, projectsRouter);
 app.use("/api/rooms", requireAuth, roomsRouter);
 app.use("/api/items", requireAuth, itemsRouter);
 app.use("/api/providers", providersRouter);
+
+// eBay marketplace account deletion notifications (public, no auth)
+app.use("/ebay", ebayRouter);
 
 // Serve the built React client
 // __dirname is server/dist at runtime, so ../../client/dist is always correct
