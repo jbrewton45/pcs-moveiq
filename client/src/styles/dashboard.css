@@ -320,7 +320,14 @@
   .pa-badge--urgency-sold { background: #052e16; color: #86efac; }
 }
 
-/* --- Photo thumbnail --- */
+/* --- Photo thumbnails --- */
+
+.db-card__photos {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  align-items: center;
+}
 
 .db-card__photo {
   width: 48px;
@@ -328,6 +335,13 @@
   border-radius: var(--radius-sm);
   object-fit: cover;
   flex-shrink: 0;
+}
+
+.db-card__photo-more {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  padding-left: var(--space-1);
 }
 
 /* --- Identification confirmation --- */
@@ -375,6 +389,44 @@
   background: var(--bg-surface);
   padding: 1px var(--space-2);
   border-radius: var(--radius-sm);
+}
+
+.db-card__confirm-condition {
+  padding: 2px var(--space-2);
+  font-size: 0.65rem;
+  font-family: var(--font-body);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.db-card__confirm-accessories {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-1);
+}
+
+.db-card__confirm-acc-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.db-card__confirm-acc-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.72rem;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.db-card__confirm-acc-item input[type="checkbox"] {
+  accent-color: var(--signal);
 }
 
 .db-card__confirm-actions {

@@ -6,22 +6,39 @@ import type { SizeClass } from "../types";
 // Types
 // ---------------------------------------------------------------------------
 
-export type DashboardItemStatus =
-  | "pending" | "analyzing" | "analyzed" | "failed" | "sold"
-  | "identifying" | "needs_confirmation";
+// ---------------------------------------------------------------------------
+// Unified item model — single canonical shape for ALL intake methods
+// ---------------------------------------------------------------------------
 
-export interface PhotoIdentification {
+export type InputMethod = "manual" | "voice" | "photo" | "walkthrough";
+
+export type DashboardItemStatus =
+  | "identifying"          // AI vision running
+  | "needs_confirmation"   // AI result ready, user must confirm
+  | "pending"              // confirmed, queued for pricing
+  | "analyzing"            // pricing in progress
+  | "analyzed"             // fully priced with urgency/channels
+  | "failed"               // error during identification or pricing
+  | "sold";                // user marked as sold
+
+export interface DetectedAccessory {
+  name: string;
+  included: boolean;       // user-confirmed inclusion
+}
+
+export interface ItemIdentification {
   suggestedName: string;
   category: string;
   condition: string;
   sizeClass: string;
-  confidence: number;
   notes: string;
+  accessories: DetectedAccessory[];
 }
 
 export interface DashboardItem {
   id: string;
-  query: string;
+  query: string;                    // confirmed item name used for pricing
+  inputMethod: InputMethod;
   sizeClass?: SizeClass;
   condition?: string;
   weightLbs?: number;
@@ -33,9 +50,13 @@ export interface DashboardItem {
   addedAt: string;
   soldAt?: string;
   soldPrice?: number;
-  // Photo intake fields
-  photoDataUrl?: string;        // base64 data URL for thumbnail display
-  identification?: PhotoIdentification;
+  // Photo fields
+  photos: string[];                 // array of compressed thumbnail data URLs
+  // Identification fields
+  identification?: ItemIdentification;
+  confirmedIdentity?: boolean;
+  // Voice transcript (if applicable)
+  transcript?: string;
 }
 
 export interface PcsContext {
@@ -75,6 +96,21 @@ function loadPcs(): PcsContext {
 
 function savePcs(ctx: PcsContext) {
   localStorage.setItem(PCS_KEY, JSON.stringify(ctx));
+}
+
+/** Parse accessory mentions from notes string into DetectedAccessory[] */
+function parseAccessories(notes: string): DetectedAccessory[] {
+  if (!notes) return [];
+  const accessoryPatterns = /(?:with|includes?|comes with|has|plus)\s+([^,;.]+)/gi;
+  const accessories: DetectedAccessory[] = [];
+  let match;
+  while ((match = accessoryPatterns.exec(notes)) !== null) {
+    const name = match[1].trim();
+    if (name.length > 2 && name.length < 60) {
+      accessories.push({ name, included: true });
+    }
+  }
+  return accessories;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,9 +183,8 @@ export function useDashboardState() {
         ));
       }
 
-      // Remove the processed ID from the queue
-      const idx = queueRef.current.indexOf(itemId);
-      if (idx !== -1) queueRef.current.splice(idx, 1);
+      // Remove the processed ID from the front of the queue
+      queueRef.current.shift();
     }
 
     processingRef.current = false;
@@ -163,10 +198,16 @@ export function useDashboardState() {
   }, [processQueue]);
 
   // --- CRUD ---
-  const addItem = useCallback((query: string, opts?: { sizeClass?: SizeClass; condition?: string; weightLbs?: number; notes?: string }) => {
+  // --- Unified item creation ---
+
+  const addItem = useCallback((query: string, opts?: {
+    sizeClass?: SizeClass; condition?: string; weightLbs?: number; notes?: string;
+    inputMethod?: InputMethod; transcript?: string;
+  }) => {
     const item: DashboardItem = {
       id: crypto.randomUUID(),
       query: query.trim(),
+      inputMethod: opts?.inputMethod ?? "manual",
       sizeClass: opts?.sizeClass,
       condition: opts?.condition,
       weightLbs: opts?.weightLbs,
@@ -176,6 +217,8 @@ export function useDashboardState() {
       error: null,
       analyzedAt: null,
       addedAt: new Date().toISOString(),
+      photos: [],
+      transcript: opts?.transcript,
     };
     setItems(prev => [...prev, item]);
     enqueue([item.id]);
@@ -189,11 +232,13 @@ export function useDashboardState() {
       .map(query => ({
         id: crypto.randomUUID(),
         query,
+        inputMethod: "manual" as const,
         status: "pending" as const,
         priority: null,
         error: null,
         analyzedAt: null,
         addedAt: new Date().toISOString(),
+        photos: [],
       }));
     setItems(prev => [...prev, ...newItems]);
     enqueue(newItems.map(it => it.id));
@@ -274,31 +319,28 @@ export function useDashboardState() {
     });
   }, []);
 
-  /** Add an item from a photo — starts identification immediately */
+  /** Add item from photo — creates draft, runs identification, awaits confirmation */
   const addPhotoItem = useCallback(async (file: File): Promise<string> => {
-    let dataUrl: string;
-    try {
-      dataUrl = await compressToThumbnail(file);
-    } catch {
-      dataUrl = ""; // proceed without thumbnail if compression fails
-    }
+    let thumbnail = "";
+    try { thumbnail = await compressToThumbnail(file); } catch { /* proceed without */ }
 
     const itemId = crypto.randomUUID();
     const item: DashboardItem = {
       id: itemId,
       query: "",
+      inputMethod: "photo",
       status: "identifying",
       priority: null,
       error: null,
       analyzedAt: null,
       addedAt: new Date().toISOString(),
-      photoDataUrl: dataUrl,
+      photos: thumbnail ? [thumbnail] : [],
     };
     setItems(prev => [...prev, item]);
 
-    // Call vision API (reuse parseVoiceWithPhoto with empty transcript)
     try {
       const result = await api.parseVoiceWithPhoto("", file);
+      const accessories = parseAccessories(result.notes);
       setItems(prev => prev.map(it =>
         it.id === itemId
           ? {
@@ -310,8 +352,8 @@ export function useDashboardState() {
                 category: result.category,
                 condition: result.condition,
                 sizeClass: result.sizeClass,
-                confidence: 0, // parseVoiceWithPhoto doesn't return confidence; 0 = unknown
                 notes: result.notes,
+                accessories,
               },
             }
           : it
@@ -325,22 +367,40 @@ export function useDashboardState() {
     }
 
     return itemId;
-  }, []);
+  }, [compressToThumbnail]);
 
-  /** Confirm photo identification and proceed to pricing */
-  const confirmIdentity = useCallback((id: string, confirmedName?: string) => {
+  /** Confirm identification and proceed to pricing pipeline.
+   *  Builds a bundle-aware query from core item + confirmed accessories. */
+  const confirmIdentity = useCallback((id: string, opts?: {
+    confirmedName?: string;
+    accessories?: DetectedAccessory[];
+    condition?: string;
+  }) => {
     setItems(prev => {
       const item = prev.find(it => it.id === id);
       if (!item || item.status !== "needs_confirmation" || !item.identification) return prev;
 
-      const name = confirmedName?.trim() || item.identification.suggestedName;
+      const coreName = opts?.confirmedName?.trim() || item.identification.suggestedName;
+      const accessories = opts?.accessories ?? item.identification.accessories;
+      const condition = opts?.condition || item.identification.condition;
+
+      // Build bundle-aware query: "Sony A7R III with 28-70mm lens, battery grip"
+      const includedAccessories = accessories.filter(a => a.included);
+      const accessoryStr = includedAccessories.map(a => a.name).join(", ");
+      const query = accessoryStr
+        ? `${coreName} with ${accessoryStr}`
+        : coreName;
+
       return prev.map(it =>
         it.id === id
           ? {
               ...it,
-              query: name,
+              query,
               sizeClass: (item.identification!.sizeClass as SizeClass) || undefined,
-              condition: item.identification!.condition || undefined,
+              condition: condition || undefined,
+              notes: item.identification!.notes || undefined,
+              identification: { ...item.identification!, accessories },
+              confirmedIdentity: true,
               status: "pending" as const,
             }
           : it
@@ -348,6 +408,54 @@ export function useDashboardState() {
     });
     enqueue([id]);
   }, [enqueue]);
+
+  /** Add an additional photo to an existing item (improves identification) */
+  const addPhotoToItem = useCallback(async (id: string, file: File) => {
+    let thumbnail = "";
+    try { thumbnail = await compressToThumbnail(file); } catch { /* proceed without */ }
+
+    // Append thumbnail and check status atomically via updater
+    let shouldReIdentify = false;
+    setItems(prev => prev.map(it => {
+      if (it.id !== id) return it;
+      if (it.status === "needs_confirmation") shouldReIdentify = true;
+      return thumbnail ? { ...it, photos: [...it.photos, thumbnail] } : it;
+    }));
+
+    // Re-run identification if item was awaiting confirmation
+    if (shouldReIdentify) {
+      setItems(prev => prev.map(it =>
+        it.id === id ? { ...it, status: "identifying" as const } : it
+      ));
+      try {
+        const result = await api.parseVoiceWithPhoto("", file);
+        const accessories = parseAccessories(result.notes);
+        setItems(prev => prev.map(it =>
+          it.id === id
+            ? {
+                ...it,
+                status: "needs_confirmation" as const,
+                query: result.itemName,
+                identification: {
+                  suggestedName: result.itemName,
+                  category: result.category,
+                  condition: result.condition,
+                  sizeClass: result.sizeClass,
+                  notes: result.notes,
+                  accessories,
+                },
+              }
+            : it
+        ));
+      } catch (err) {
+        setItems(prev => prev.map(it =>
+          it.id === id
+            ? { ...it, status: "needs_confirmation" as const, error: err instanceof Error ? err.message : "Re-identification failed" }
+            : it
+        ));
+      }
+    }
+  }, [compressToThumbnail]);
 
   const editSoldPrice = useCallback((id: string, soldPrice: number | undefined) => {
     setItems(prev => prev.map(it =>
@@ -383,6 +491,7 @@ export function useDashboardState() {
     undoSold,
     editSoldPrice,
     addPhotoItem,
+    addPhotoToItem,
     confirmIdentity,
   };
 }

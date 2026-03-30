@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useDashboardState } from "../../hooks/useDashboardState";
-import type { DashboardItem, PcsContext } from "../../hooks/useDashboardState";
+import type { DashboardItem, PcsContext, DetectedAccessory } from "../../hooks/useDashboardState";
 import { useVoiceIntake } from "../../hooks/useVoiceIntake";
 import type { UrgencyBucket } from "../../types";
 import {
@@ -185,8 +185,9 @@ function DashboardPcsPanel({
 // Item Form (with voice hook)
 // ---------------------------------------------------------------------------
 
-function DashboardItemForm({ onAdd, onAddMultiple, onAddPhoto }: {
+function DashboardItemForm({ onAdd, onAddVoice, onAddMultiple, onAddPhoto }: {
   onAdd: (query: string) => void;
+  onAddVoice: (transcript: string) => void;
   onAddMultiple: (queries: string[]) => void;
   onAddPhoto: (file: File) => void;
 }) {
@@ -210,7 +211,7 @@ function DashboardItemForm({ onAdd, onAddMultiple, onAddPhoto }: {
 
   function handleVoiceUse() {
     if (voice.transcript) {
-      onAdd(voice.transcript);
+      onAddVoice(voice.transcript);
       voice.reset();
     }
   }
@@ -312,9 +313,11 @@ function ItemCard({ item, weekDateRange, onExpand, onRemove, onReanalyze, onMark
   onMarkSold: () => void;
   onUndoSold: () => void;
   onEditSoldPrice: () => void;
-  onConfirmIdentity: (confirmedName?: string) => void;
+  onConfirmIdentity: (opts?: { confirmedName?: string; accessories?: DetectedAccessory[]; condition?: string }) => void;
 }) {
   const [editName, setEditName] = useState("");
+  const [editAccessories, setEditAccessories] = useState<DetectedAccessory[] | null>(null);
+  const [editCondition, setEditCondition] = useState("");
   const p = item.priority;
   const bucket = p?.urgency.bucket;
   const css = bucket ? BUCKET_CSS[bucket] : undefined;
@@ -323,11 +326,19 @@ function ItemCard({ item, weekDateRange, onExpand, onRemove, onReanalyze, onMark
   const topChannel = p?.channels[0]?.channel;
   const isSold = item.status === "sold";
 
+  // Initialize edit state from identification when entering confirmation
+  const accessories = editAccessories ?? item.identification?.accessories ?? [];
+
   return (
     <div className={`db-card ${css ? `db-card--${css}` : ""} ${isSold ? "db-card--sold" : ""}`} onClick={item.status === "needs_confirmation" ? undefined : onExpand}>
-      {/* Photo thumbnail */}
-      {item.photoDataUrl && (
-        <img className="db-card__photo" src={item.photoDataUrl} alt="" />
+      {/* Photo thumbnail(s) */}
+      {item.photos.length > 0 && (
+        <div className="db-card__photos">
+          {item.photos.slice(0, 3).map((url, i) => (
+            <img key={i} className="db-card__photo" src={url} alt="" />
+          ))}
+          {item.photos.length > 3 && <span className="db-card__photo-more">+{item.photos.length - 3}</span>}
+        </div>
       )}
       <div className="db-card__main">
         {/* Identification states */}
@@ -345,16 +356,48 @@ function ItemCard({ item, weekDateRange, onExpand, onRemove, onReanalyze, onMark
               type="text"
               defaultValue={item.identification.suggestedName}
               onChange={(e) => setEditName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") onConfirmIdentity({ confirmedName: editName || undefined, accessories, condition: editCondition || undefined }); }}
               placeholder={item.identification.suggestedName}
             />
             <div className="db-card__confirm-meta">
               <span className="db-card__confirm-detail">{item.identification.category}</span>
-              <span className="db-card__confirm-detail">{item.identification.condition}</span>
+              <select
+                className="db-card__confirm-condition"
+                value={editCondition || item.identification.condition}
+                onChange={(e) => setEditCondition(e.target.value)}
+              >
+                <option value="NEW">New</option>
+                <option value="LIKE_NEW">Like New</option>
+                <option value="GOOD">Good</option>
+                <option value="FAIR">Fair</option>
+                <option value="POOR">Poor</option>
+              </select>
               <span className="db-card__confirm-detail">{item.identification.sizeClass}</span>
             </div>
+            {/* Accessory checkboxes */}
+            {accessories.length > 0 && (
+              <div className="db-card__confirm-accessories">
+                <span className="db-card__confirm-acc-label">Included accessories:</span>
+                {accessories.map((acc, i) => (
+                  <label key={i} className="db-card__confirm-acc-item">
+                    <input
+                      type="checkbox"
+                      checked={acc.included}
+                      onChange={() => {
+                        const updated = [...accessories];
+                        updated[i] = { ...acc, included: !acc.included };
+                        setEditAccessories(updated);
+                      }}
+                    />
+                    <span>{acc.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
             <div className="db-card__confirm-actions">
-              <button type="button" className="db-btn db-btn--small db-form__btn" onClick={() => onConfirmIdentity(editName || undefined)}>
-                Confirm
+              <button type="button" className="db-btn db-btn--small db-form__btn"
+                onClick={() => onConfirmIdentity({ confirmedName: editName || undefined, accessories, condition: editCondition || undefined })}>
+                Confirm &amp; Price
               </button>
               <button type="button" className="db-btn db-btn--small db-btn--outline" onClick={onRemove}>
                 Discard
@@ -576,12 +619,11 @@ function ItemDetail({ item, onClose }: { item: DashboardItem; onClose: () => voi
 // Timeline View
 // ---------------------------------------------------------------------------
 
-function DashboardTimeline({ items, pcsContext, onExportCalendar }: {
-  items: DashboardItem[];
+function DashboardTimeline({ plan, pcsContext, onExportCalendar }: {
+  plan: ReturnType<typeof buildWeeklyPlan>;
   pcsContext: PcsContext;
   onExportCalendar: () => void;
 }) {
-  const plan = buildWeeklyPlan(items, pcsContext);
   const regionNotes = getRegionChannelNotes(pcsContext.region);
 
   if (plan.summary.totalItems === 0) {
@@ -875,8 +917,7 @@ export function SellDashboard() {
   }
 
   function handleExportCalendar() {
-    if (!pcsContext.pcsDate) return;
-    const plan = buildWeeklyPlan(items, pcsContext);
+    if (!pcsContext.pcsDate || !plan) return;
     const ics = generateIcs(plan, pcsContext.pcsDate);
     downloadIcs(ics, `pcs-sell-plan-${pcsContext.pcsDate}.ics`);
   }
@@ -946,7 +987,8 @@ export function SellDashboard() {
       />
 
       <DashboardItemForm
-        onAdd={addItem}
+        onAdd={(q) => addItem(q, { inputMethod: "manual" })}
+        onAddVoice={(t) => addItem(t, { inputMethod: "voice", transcript: t })}
         onAddMultiple={addMultiple}
         onAddPhoto={(file) => { void addPhotoItem(file); }}
       />
@@ -1027,7 +1069,7 @@ export function SellDashboard() {
 
       {/* Timeline view */}
       {viewMode === "timeline" && items.length > 0 && (
-        <DashboardTimeline items={items} pcsContext={pcsContext} onExportCalendar={handleExportCalendar} />
+        <DashboardTimeline plan={plan!} pcsContext={pcsContext} onExportCalendar={handleExportCalendar} />
       )}
 
       {/* List view */}
@@ -1044,7 +1086,7 @@ export function SellDashboard() {
               onMarkSold={() => handleMarkSold(item.id)}
               onUndoSold={() => handleUndoSold(item.id)}
               onEditSoldPrice={() => handleEditSoldPrice(item.id)}
-              onConfirmIdentity={(name) => confirmIdentity(item.id, name)}
+              onConfirmIdentity={(opts) => confirmIdentity(item.id, opts)}
             />
           ))}
         </div>
