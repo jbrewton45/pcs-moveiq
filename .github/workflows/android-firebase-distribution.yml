@@ -1,0 +1,135 @@
+# ============================================================================
+# Firebase App Distribution — Android APK
+# ============================================================================
+#
+# Builds the Capacitor Android APK and uploads it to Firebase App Distribution
+# for tester access. Triggers on push to the deploy/replit branch.
+#
+# Required GitHub Secrets:
+#   FIREBASE_APP_ID_ANDROID    — Firebase App ID (looks like 1:123456:android:abcdef)
+#   FIREBASE_SERVICE_ACCOUNT_JSON — Full JSON content of a Firebase service account key
+#   FIREBASE_TESTERS           — Comma-separated tester emails (e.g. "a@b.com, c@d.com")
+#
+# APK is built at:
+#   client/android/app/build/outputs/apk/debug/app-debug.apk
+#
+# The service account JSON is written to a temp file at runtime and deleted
+# after upload. It is NEVER committed to the repo.
+# ============================================================================
+
+name: Firebase App Distribution
+
+on:
+  push:
+    branches: [deploy/replit]
+
+jobs:
+  build-and-distribute:
+    name: Build APK & Upload to Firebase
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+
+    steps:
+      # ------------------------------------------------------------------
+      # 1. Checkout repo
+      # ------------------------------------------------------------------
+      - uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # 2. Set up Node.js 22 for building the web app
+      # ------------------------------------------------------------------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      # ------------------------------------------------------------------
+      # 3. Set up Java 21 (required by Android Gradle)
+      # ------------------------------------------------------------------
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # ------------------------------------------------------------------
+      # 4. Install npm dependencies
+      # ------------------------------------------------------------------
+      - name: Install dependencies
+        run: npm ci
+
+      # ------------------------------------------------------------------
+      # 5. Build the web app and sync to Capacitor Android project
+      #    This runs: vite build → npx cap sync android
+      # ------------------------------------------------------------------
+      - name: Build web app and sync to Android
+        run: npm run cap:build
+
+      # ------------------------------------------------------------------
+      # 6. Build the debug APK via Gradle
+      #    Output: client/android/app/build/outputs/apk/debug/app-debug.apk
+      # ------------------------------------------------------------------
+      - name: Build debug APK
+        working-directory: client/android
+        run: ./gradlew assembleDebug
+
+      # ------------------------------------------------------------------
+      # 7. Verify the APK was actually produced (fail fast if missing)
+      # ------------------------------------------------------------------
+      - name: Verify APK exists
+        run: |
+          APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "::error::APK not found at $APK_PATH"
+            exit 1
+          fi
+          echo "APK size: $(du -h "$APK_PATH" | cut -f1)"
+
+      # ------------------------------------------------------------------
+      # 8. Install Firebase CLI (used for App Distribution upload)
+      # ------------------------------------------------------------------
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      # ------------------------------------------------------------------
+      # 9. Write service account JSON to a temp file
+      #    RUNNER_TEMP is an ephemeral directory that is cleaned up after
+      #    each job — the key never persists on the runner.
+      # ------------------------------------------------------------------
+      - name: Write service account key
+        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > "$RUNNER_TEMP/firebase-sa.json"
+
+      # ------------------------------------------------------------------
+      # 10. Upload APK to Firebase App Distribution
+      #     --app:     Firebase App ID (from secrets)
+      #     --testers: comma-separated email list (from secrets)
+      #     --token is NOT used; we authenticate via service account
+      # ------------------------------------------------------------------
+      - name: Upload to Firebase App Distribution
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+        run: |
+          firebase appdistribution:distribute \
+            android/app/build/outputs/apk/debug/app-debug.apk \
+            --app "${{ secrets.FIREBASE_APP_ID_ANDROID }}" \
+            --testers "${{ secrets.FIREBASE_TESTERS }}" \
+            --release-notes "Branch: ${{ github.ref_name }} | Commit: ${{ github.sha }} | Run: #${{ github.run_number }}"
+
+      # ------------------------------------------------------------------
+      # 11. Clean up service account key (belt + suspenders with RUNNER_TEMP)
+      # ------------------------------------------------------------------
+      - name: Clean up credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/firebase-sa.json"
+
+      # ------------------------------------------------------------------
+      # 12. Also upload APK as a GitHub artifact for manual download
+      # ------------------------------------------------------------------
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pcs-moveiq-firebase-dist
+          path: client/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
