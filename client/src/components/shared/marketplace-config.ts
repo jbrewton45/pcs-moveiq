@@ -64,28 +64,7 @@ export function buildMarketplaceUrl(source: ListingSource, query: string): strin
   return config.searchUrlTemplate.replace("{query}", encodeURIComponent(query));
 }
 
-// ---------------------------------------------------------------------------
-// Future expansion hooks (stubs — no implementation yet)
-// ---------------------------------------------------------------------------
-
-/**
- * Placeholder for Facebook Marketplace listing fetch.
- * When implemented, this would call a server-side proxy
- * that searches Facebook Marketplace and returns normalized results
- * compatible with the existing EbaySearchResult interface.
- */
-export async function fetchFacebookListings(_query: string): Promise<null> {
-  // TODO: Implement server-side FB Marketplace proxy
-  return null;
-}
-
-/**
- * Placeholder for OfferUp listing fetch.
- */
-export async function fetchOfferUpListings(_query: string): Promise<null> {
-  // TODO: Implement server-side OfferUp proxy
-  return null;
-}
+// Future: fetchFacebookListings, fetchOfferUpListings — add when server proxies are built
 
 // ---------------------------------------------------------------------------
 // Region-specific channel overrides
