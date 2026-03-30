@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { UpdateBanner } from "./UpdateBanner";
 
 interface Props {
   userName: string;
@@ -37,6 +38,7 @@ export function AppLayout({ userName, onLogout }: Props) {
         </div>
       </header>
 
+      <UpdateBanner />
       <main className="mobile-app__content">
         <Outlet />
       </main>

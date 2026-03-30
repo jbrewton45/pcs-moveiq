@@ -8,7 +8,7 @@ import {
   exportSession, validateSession, downloadJson,
   buildWeeklyPlan, generateIcs, downloadIcs,
 } from "../shared/pricing-helpers";
-import { channelToSource, buildMarketplaceUrl, getRegionChannelNotes } from "../shared/marketplace-config";
+import { getRegionChannelNotes } from "../shared/marketplace-config";
 import "../../styles/dashboard.css";
 
 // ---------------------------------------------------------------------------
@@ -219,6 +219,17 @@ function DashboardItemForm({ onAdd, onAddVoice, onAddMultiple, onAddPhoto }: {
   return (
     <div className="db-form">
       <form className="db-form__row" onSubmit={handleSubmit}>
+        {/* Camera is the primary CTA — always first */}
+        {!bulkMode && (
+          <button
+            type="button"
+            className="db-form__camera"
+            onClick={() => photoInputRef.current?.click()}
+            title="Take or upload photo"
+          >
+            &#x1F4F7;
+          </button>
+        )}
         {bulkMode ? (
           <textarea
             className="db-form__textarea"
@@ -233,7 +244,7 @@ function DashboardItemForm({ onAdd, onAddVoice, onAddMultiple, onAddPhoto }: {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Add item, e.g. Sony A7R III"
+            placeholder="Type or snap a photo"
           />
         )}
         <button className="db-form__btn" type="submit" disabled={!input.trim()}>
@@ -255,16 +266,6 @@ function DashboardItemForm({ onAdd, onAddVoice, onAddMultiple, onAddPhoto }: {
             title={voice.state === "recording" ? "Stop recording" : voice.state === "done" ? "Add spoken item" : "Speak item name"}
           >
             {voice.state === "recording" ? "\u23F9" : voice.state === "done" ? "\u2713" : "\u{1F3A4}"}
-          </button>
-        )}
-        {!bulkMode && (
-          <button
-            type="button"
-            className="db-form__mic"
-            onClick={() => photoInputRef.current?.click()}
-            title="Take or upload photo"
-          >
-            &#x1F4F7;
           </button>
         )}
         <input
@@ -304,16 +305,20 @@ function DashboardItemForm({ onAdd, onAddVoice, onAddMultiple, onAddPhoto }: {
 // Item Card (compact)
 // ---------------------------------------------------------------------------
 
-function ItemCard({ item, weekDateRange, onExpand, onRemove, onReanalyze, onMarkSold, onUndoSold, onEditSoldPrice, onConfirmIdentity }: {
+function ItemCard({ item, weekDateRange, isExpanded, isEditing, onToggleExpand, onToggleEdit, onRemove, onReanalyze, onMarkSold, onUndoSold, onEditSoldPrice, onConfirmIdentity, onUpdateItem }: {
   item: DashboardItem;
   weekDateRange?: string | null;
-  onExpand: () => void;
+  isExpanded: boolean;
+  isEditing: boolean;
+  onToggleExpand: () => void;
+  onToggleEdit: () => void;
   onRemove: () => void;
   onReanalyze: () => void;
   onMarkSold: () => void;
   onUndoSold: () => void;
   onEditSoldPrice: () => void;
   onConfirmIdentity: (opts?: { confirmedName?: string; accessories?: DetectedAccessory[]; condition?: string }) => void;
+  onUpdateItem: (updates: Partial<Pick<DashboardItem, "query" | "sizeClass" | "condition" | "weightLbs" | "notes">>) => void;
 }) {
   const [editName, setEditName] = useState("");
   const [editAccessories, setEditAccessories] = useState<DetectedAccessory[] | null>(null);
@@ -330,7 +335,7 @@ function ItemCard({ item, weekDateRange, onExpand, onRemove, onReanalyze, onMark
   const accessories = editAccessories ?? item.identification?.accessories ?? [];
 
   return (
-    <div className={`db-card ${css ? `db-card--${css}` : ""} ${isSold ? "db-card--sold" : ""}`} onClick={item.status === "needs_confirmation" ? undefined : onExpand}>
+    <div className={`db-card ${css ? `db-card--${css}` : ""} ${isSold ? "db-card--sold" : ""} ${isExpanded ? "db-card--expanded" : ""}`} onClick={item.status === "needs_confirmation" ? undefined : onToggleExpand}>
       {/* Photo thumbnail(s) */}
       {item.photos.length > 0 && (
         <div className="db-card__photos">
@@ -415,31 +420,16 @@ function ItemCard({ item, weekDateRange, onExpand, onRemove, onReanalyze, onMark
           {isSold && <span className="db-card__status db-card__status--sold">Sold</span>}
         </div>
         )}
+        {/* Collapsed: minimal info only */}
         {p && !isSold && (
-          <>
-            <div className="db-card__result">
-              <span className={`pa-badge pa-badge--urgency-${css}`}>{displayLabel}</span>
-              {recPrice !== null && recPrice !== undefined && (
-                <span className="db-card__price">${formatPrice(recPrice)}</span>
-              )}
-              {topChannel && <ChannelLink channel={topChannel} query={item.query} />}
-            </div>
-            {/* Timeline date + action plan */}
-            <div className="db-card__plan">
-              {weekDateRange && <span className="db-card__date">Sell by: {weekDateRange}</span>}
-              {p.urgency.adjustedDaysToPCS !== null && p.urgency.daysUntilPCS !== null &&
-                p.urgency.adjustedDaysToPCS < p.urgency.daysUntilPCS && (
-                <span className="db-card__adjusted">
-                  {p.urgency.adjustedDaysToPCS}d effective ({p.urgency.daysUntilPCS}d raw)
-                </span>
-              )}
-              {p.pricing.originalTiers && bucket === "SELL_IMMEDIATELY" && (
-                <span className="db-card__action-plan">
-                  List at ${formatPrice(p.pricing.originalTiers.fastSale)}, drop to ${formatPrice(Math.round(p.pricing.originalTiers.fastSale * 0.85))} in 5 days
-                </span>
-              )}
-            </div>
-          </>
+          <div className="db-card__result">
+            <span className={`pa-badge pa-badge--urgency-${css}`}>{displayLabel}</span>
+            {recPrice !== null && recPrice !== undefined && (
+              <span className="db-card__price">${formatPrice(recPrice)}</span>
+            )}
+            {topChannel && <span className="db-card__channel">{topChannel}</span>}
+            {weekDateRange && <span className="db-card__date">{weekDateRange}</span>}
+          </div>
         )}
         {isSold && (
           <div className="db-card__result">
@@ -461,159 +451,127 @@ function ItemCard({ item, weekDateRange, onExpand, onRemove, onReanalyze, onMark
             <button type="button" className="db-card__action" onClick={onUndoSold} title="Undo sold">&#x21B6;</button>
           </>
         )}
+        {(item.status === "analyzed" || item.status === "failed" || item.status === "sold") && (
+          <button type="button" className="db-card__action" onClick={onToggleEdit} title="Edit">&#x270E;</button>
+        )}
         {(item.status === "analyzed" || item.status === "failed") && (
           <button type="button" className="db-card__action" onClick={onReanalyze} title="Re-analyze">&#x21bb;</button>
         )}
         <button type="button" className="db-card__action db-card__action--delete" onClick={onRemove} title="Remove">&times;</button>
       </div>
-    </div>
-  );
-}
 
-// ---------------------------------------------------------------------------
-// Channel Link (marketplace-aware)
-// ---------------------------------------------------------------------------
-
-function ChannelLink({ channel, query }: { channel: string; query: string }) {
-  const source = channelToSource(channel);
-  const url = buildMarketplaceUrl(source, query);
-  if (url) {
-    return (
-      <a
-        className="db-card__channel db-card__channel--link"
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {channel} &#x2197;
-      </a>
-    );
-  }
-  return <span className="db-card__channel">{channel}</span>;
-}
-
-// ---------------------------------------------------------------------------
-// Item Detail (expanded)
-// ---------------------------------------------------------------------------
-
-function ItemDetail({ item, onClose }: { item: DashboardItem; onClose: () => void }) {
-  const p = item.priority;
-
-  if (!p) {
-    return (
-      <div className="db-detail">
-        <div className="db-detail__header">
-          <h3 className="db-detail__title">{item.query}</h3>
-          <button type="button" className="db-detail__close" onClick={onClose}>&times;</button>
-        </div>
-        {item.error && <p className="db-card__error">{item.error}</p>}
-        {!item.error && <p className="db-detail__summary">No analysis results yet.</p>}
-      </div>
-    );
-  }
-
-  const { urgency, channels, pricing } = p;
-  const css = BUCKET_CSS[urgency.bucket] ?? "minimal";
-  const displayLabel = BUCKET_DISPLAY[urgency.bucket] ?? urgency.bucket;
-  const analysis = p.ebayAnalysis;
-
-  return (
-    <div className="db-detail">
-      <div className="db-detail__header">
-        <h3 className="db-detail__title">{item.query}</h3>
-        <button type="button" className="db-detail__close" onClick={onClose}>&times;</button>
-      </div>
-
-      <div className={`pcs-urgency pcs-urgency--${css}`}>
-        <div className="pcs-urgency__header">
-          <div className="pcs-urgency__badge-row">
-            <span className={`pa-badge pa-badge--urgency-${css}`}>{displayLabel}</span>
-            <span className="pcs-urgency__score">Score: {urgency.score}/100</span>
-          </div>
-          {urgency.daysUntilPCS !== null && (
-            <span className="pcs-urgency__days">
-              {urgency.daysUntilPCS} day{urgency.daysUntilPCS === 1 ? "" : "s"} until PCS
-              {urgency.adjustedDaysToPCS !== null && urgency.adjustedDaysToPCS < urgency.daysUntilPCS && (
-                <span className="pcs-urgency__adjusted">
-                  {" "}(effective: {urgency.adjustedDaysToPCS}d due to location)
-                </span>
-              )}
-            </span>
-          )}
-        </div>
-
-        <p className="pcs-urgency__headline">{urgency.headline}</p>
-
-        {pricing.recommendedPrice !== null && pricing.originalTiers && (
-          <div className="pcs-urgency__price-row">
-            <span className="pcs-urgency__rec-price">${formatPrice(pricing.recommendedPrice)}</span>
-            <span className="pcs-urgency__price-label">Recommended Price</span>
-          </div>
-        )}
-
-        {pricing.originalTiers && (
-          <div className="pricing-bands">
-            <div className="pricing-band">
-              <span className="pricing-band__value">${formatPrice(pricing.originalTiers.fastSale)}</span>
-              <span className="pricing-band__label">Fast Sale</span>
-            </div>
-            <div className="pricing-band">
-              <span className="pricing-band__value">${formatPrice(pricing.originalTiers.fairMarket)}</span>
-              <span className="pricing-band__label">Fair Market</span>
-            </div>
-            <div className="pricing-band">
-              <span className="pricing-band__value">${formatPrice(pricing.originalTiers.maxReach)}</span>
-              <span className="pricing-band__label">Max Reach</span>
-            </div>
-          </div>
-        )}
-
-        <div className="pcs-urgency__strategy">
-          <span className="pa-strategy__label">Pricing strategy</span>
-          <span className="pa-strategy__text">{pricing.pricingStrategy}</span>
-        </div>
-
-        {channels.length > 0 && (
-          <div className="pcs-urgency__channels">
-            <span className="pcs-urgency__channels-label">Where to sell</span>
-            <div className="pcs-urgency__channel-list">
-              {channels.map((ch) => (
-                <div key={ch.channel} className={`pcs-channel ${ch.fits ? "" : "pcs-channel--no-fit"}`}>
-                  <div className="pcs-channel__header">
-                    <span className="pcs-channel__rank">#{ch.rank}</span>
-                    <ChannelLink channel={ch.channel} query={item.query} />
-                    <span className="pcs-channel__speed">{ch.estimatedDaysToSell}</span>
-                  </div>
-                  <p className="pcs-channel__reason">{ch.reason}</p>
-                  {!ch.fits && <span className="pcs-channel__warning">May not complete before PCS</span>}
+      {/* Expanded detail — accordion, shows full analysis */}
+      {isExpanded && p && (
+        <div className="db-card__inline-detail" onClick={(e) => e.stopPropagation()}>
+          <div className={`pcs-urgency pcs-urgency--${css}`}>
+            {/* Action plan for urgent items */}
+            {p.pricing.originalTiers && bucket === "SELL_IMMEDIATELY" && (
+              <p className="db-card__action-plan">
+                List at ${formatPrice(p.pricing.originalTiers.fastSale)}, drop to ${formatPrice(Math.round(p.pricing.originalTiers.fastSale * 0.85))} in 5 days
+              </p>
+            )}
+            {p.urgency.adjustedDaysToPCS !== null && p.urgency.daysUntilPCS !== null &&
+              p.urgency.adjustedDaysToPCS < p.urgency.daysUntilPCS && (
+              <p className="db-card__adjusted">
+                {p.urgency.daysUntilPCS}d until PCS (effective: {p.urgency.adjustedDaysToPCS}d due to location)
+              </p>
+            )}
+            <p className="pcs-urgency__headline">{p.urgency.headline}</p>
+            {p.pricing.originalTiers && (
+              <div className="pricing-bands">
+                <div className="pricing-band">
+                  <span className="pricing-band__value">${formatPrice(p.pricing.originalTiers.fastSale)}</span>
+                  <span className="pricing-band__label">Fast Sale</span>
                 </div>
-              ))}
+                <div className="pricing-band">
+                  <span className="pricing-band__value">${formatPrice(p.pricing.originalTiers.fairMarket)}</span>
+                  <span className="pricing-band__label">Fair Market</span>
+                </div>
+                <div className="pricing-band">
+                  <span className="pricing-band__value">${formatPrice(p.pricing.originalTiers.maxReach)}</span>
+                  <span className="pricing-band__label">Max Reach</span>
+                </div>
+              </div>
+            )}
+            <div className="pcs-urgency__strategy">
+              <span className="pa-strategy__label">Strategy</span>
+              <span className="pa-strategy__text">{p.pricing.pricingStrategy}</span>
             </div>
+            {p.channels.length > 0 && (
+              <div className="pcs-urgency__channels">
+                <span className="pcs-urgency__channels-label">Where to sell</span>
+                <div className="pcs-urgency__channel-list">
+                  {p.channels.slice(0, 3).map(ch => (
+                    <div key={ch.channel} className={`pcs-channel ${ch.fits ? "" : "pcs-channel--no-fit"}`}>
+                      <div className="pcs-channel__header">
+                        <span className="pcs-channel__rank">#{ch.rank}</span>
+                        <span className="pcs-channel__name">{ch.channel}</span>
+                        <span className="pcs-channel__speed">{ch.estimatedDaysToSell}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <details className="pcs-urgency__reasoning-details">
+              <summary className="pcs-urgency__reasoning-toggle">Scoring breakdown</summary>
+              <ul className="pcs-urgency__reasoning-list">
+                {p.urgency.reasoning.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </details>
           </div>
-        )}
+        </div>
+      )}
 
-        <details className="pcs-urgency__reasoning-details">
-          <summary className="pcs-urgency__reasoning-toggle">Scoring breakdown</summary>
-          <ul className="pcs-urgency__reasoning-list">
-            {urgency.reasoning.map((r, i) => <li key={i}>{r}</li>)}
-          </ul>
-        </details>
-      </div>
-
-      <div className="db-detail__market">
-        <span className={`pa-badge pa-badge--health-${analysis.analysis.marketHealth}`}>
-          {analysis.analysis.marketHealth} market
-        </span>
-        <span className={`pa-badge pa-badge--confidence-${analysis.analysis.confidenceLabel}`}>
-          {analysis.analysis.confidenceLabel} confidence
-        </span>
-      </div>
-
-      <p className="db-detail__summary">{analysis.analysis.summary}</p>
+      {/* Inline edit sheet */}
+      {isEditing && (
+        <div className="db-card__edit" onClick={(e) => e.stopPropagation()}>
+          <label className="db-card__edit-field">
+            <span className="db-card__edit-label">Name</span>
+            <input className="db-card__confirm-input" type="text" defaultValue={item.query}
+              onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== item.query) onUpdateItem({ query: v }); }} />
+          </label>
+          <div className="db-card__edit-row">
+            <label className="db-card__edit-field">
+              <span className="db-card__edit-label">Condition</span>
+              <select className="db-card__confirm-condition" value={item.condition ?? ""}
+                onChange={(e) => onUpdateItem({ condition: e.target.value || undefined })}>
+                <option value="">—</option>
+                <option value="NEW">New</option>
+                <option value="LIKE_NEW">Like New</option>
+                <option value="GOOD">Good</option>
+                <option value="FAIR">Fair</option>
+                <option value="POOR">Poor</option>
+              </select>
+            </label>
+            <label className="db-card__edit-field">
+              <span className="db-card__edit-label">Size</span>
+              <select className="db-card__confirm-condition" value={item.sizeClass ?? ""}
+                onChange={(e) => onUpdateItem({ sizeClass: (e.target.value as import("../../types").SizeClass) || undefined })}>
+                <option value="">—</option>
+                <option value="SMALL">Small</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="LARGE">Large</option>
+                <option value="OVERSIZED">Oversized</option>
+              </select>
+            </label>
+          </div>
+          <label className="db-card__edit-field">
+            <span className="db-card__edit-label">Notes</span>
+            <input className="db-card__confirm-input" type="text" defaultValue={item.notes ?? ""}
+              onBlur={(e) => onUpdateItem({ notes: e.target.value || undefined })} />
+          </label>
+          <div className="db-card__edit-actions">
+            <button type="button" className="db-btn db-btn--small db-btn--outline" onClick={onToggleEdit}>Done</button>
+            <button type="button" className="db-btn db-btn--small db-btn--outline" onClick={() => { onToggleEdit(); onReanalyze(); }}>Save &amp; Re-analyze</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+// ChannelLink removed — collapsed cards use plain text, expanded shows channels inline
 
 // ---------------------------------------------------------------------------
 // Timeline View
@@ -868,17 +826,16 @@ export function SellDashboard() {
     items, pcsContext, isProcessing,
     addItem, addMultiple, removeItem, reanalyzeItem,
     reanalyzeAll, clearAll, updatePcsContext, replaceAll,
-    markAsSold, undoSold, editSoldPrice, addPhotoItem, confirmIdentity,
+    markAsSold, undoSold, editSoldPrice, updateItem, addPhotoItem, confirmIdentity,
   } = useDashboardState();
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("urgency");
   const [filterBucket, setFilterBucket] = useState<UrgencyBucket | "all">("all");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const expandedItem = expandedId ? items.find(it => it.id === expandedId) : null;
 
   // Compute plan once for both views (timeline + list card dates)
   const plan = items.length > 0 ? buildWeeklyPlan(items, pcsContext) : null;
@@ -1080,26 +1037,23 @@ export function SellDashboard() {
               key={item.id}
               item={item}
               weekDateRange={plan?.itemWeekMap.get(item.id)?.dateRange}
-              onExpand={() => setExpandedId(expandedId === item.id ? null : item.id)}
+              isExpanded={expandedId === item.id}
+              isEditing={editingId === item.id}
+              onToggleExpand={() => { setExpandedId(expandedId === item.id ? null : item.id); setEditingId(null); }}
+              onToggleEdit={() => setEditingId(editingId === item.id ? null : item.id)}
               onRemove={() => removeItem(item.id)}
               onReanalyze={() => reanalyzeItem(item.id)}
               onMarkSold={() => handleMarkSold(item.id)}
               onUndoSold={() => handleUndoSold(item.id)}
               onEditSoldPrice={() => handleEditSoldPrice(item.id)}
               onConfirmIdentity={(opts) => confirmIdentity(item.id, opts)}
+              onUpdateItem={(updates) => updateItem(item.id, updates)}
             />
           ))}
         </div>
       )}
 
-      {/* Expanded detail */}
-      {expandedItem && (expandedItem.priority || expandedItem.error) && (
-        <div className="db-detail-overlay" onClick={() => setExpandedId(null)}>
-          <div className="db-detail-container" onClick={(e) => e.stopPropagation()}>
-            <ItemDetail item={expandedItem} onClose={() => setExpandedId(null)} />
-          </div>
-        </div>
-      )}
+      {/* Detail is now inline in ItemCard — no modal overlay */}
 
       {items.length === 0 && (
         <div className="pa-empty">

@@ -7,8 +7,12 @@ android {
         applicationId "com.pcsmoveiq.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+
+        // Auto-versioning: CI sets these via environment variables.
+        // Falls back to 1 / "1.0.0" for local development builds.
+        versionCode (System.env.VERSION_CODE ?: "1").toInteger()
+        versionName System.env.VERSION_NAME ?: "1.0.0"
+
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +20,31 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+    // Release signing — reads from keystore.properties (written by CI from secrets)
+    // or falls back gracefully for local debug builds.
+    def keystorePropsFile = rootProject.file("app/keystore.properties")
+    if (keystorePropsFile.exists()) {
+        def keystoreProps = new Properties()
+        keystoreProps.load(new FileInputStream(keystorePropsFile))
+        signingConfigs {
+            release {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Use release signing config if available, otherwise unsigned
+            if (keystorePropsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
@@ -40,6 +65,10 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+
+    // Firebase — App Distribution tester update alerts
+    implementation platform('com.google.firebase:firebase-bom:33.8.0')
+    implementation 'com.google.firebase:firebase-appdistribution'
 }
 
 apply from: 'capacitor.build.gradle'

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { ProviderStatus, ProviderTestResult } from "../api";
+import { useAppUpdate } from "../hooks/useAppUpdate";
 
 const MODE_LABEL: Record<string, string> = {
   live: "Live",
@@ -248,6 +249,72 @@ export function ProviderSettings({ onBack }: Props) {
           API keys are managed in the server <code>.env</code> file. See <code>.env.example</code> for configuration details. Restart the server after changing keys.
         </p>
       </div>
+
+      <AppInfoSection />
+    </div>
+  );
+}
+
+function AppInfoSection() {
+  const update = useAppUpdate();
+
+  return (
+    <div className="provider-card" style={{ marginTop: "var(--space-4)" }}>
+      <div className="provider-card__header">
+        <div className="provider-card__name-row">
+          <span className="provider-card__name">App Info</span>
+        </div>
+        <p className="provider-card__desc">Version and update status</p>
+      </div>
+
+      <div className="provider-card__details">
+        <div className="provider-card__field">
+          <span className="provider-card__field-label">Version</span>
+          <code className="provider-card__field-value">
+            {update.versionName ?? "dev"}{update.versionCode ? ` (${update.versionCode})` : ""}
+          </code>
+        </div>
+        <div className="provider-card__field">
+          <span className="provider-card__field-label">Platform</span>
+          <code className="provider-card__field-value">
+            {update.isAndroid ? "Android" : "Web"}
+          </code>
+        </div>
+        <div className="provider-card__field">
+          <span className="provider-card__field-label">Update Status</span>
+          <code className="provider-card__field-value">
+            {update.status === "checking" && "Checking..."}
+            {update.status === "available" && `Update available${update.newVersionName ? ` (v${update.newVersionName})` : ""}`}
+            {update.status === "up_to_date" && "Up to date"}
+            {update.status === "updating" && "Installing..."}
+            {update.status === "error" && (update.error ?? "Error")}
+            {(update.status === "idle" || update.status === "dismissed") && (update.isAndroid ? "Not checked" : "N/A (web)")}
+          </code>
+        </div>
+      </div>
+
+      {update.isAndroid && (
+        <div className="provider-card__actions">
+          <button
+            className="btn-action-sm"
+            disabled={update.status === "checking" || update.status === "updating"}
+            onClick={update.checkForUpdate}
+          >
+            {update.status === "checking" ? "Checking..." : "Check for Update"}
+          </button>
+          {update.status === "available" && (
+            <button className="btn-action-sm" onClick={update.installUpdate}>
+              Install Update
+            </button>
+          )}
+        </div>
+      )}
+
+      {update.releaseNotes && update.status === "available" && (
+        <div style={{ padding: "var(--space-2) var(--space-3)", fontSize: "0.72rem", color: "var(--text-secondary)" }}>
+          <strong>Release notes:</strong> {update.releaseNotes}
+        </div>
+      )}
     </div>
   );
 }

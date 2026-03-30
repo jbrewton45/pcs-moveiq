@@ -457,6 +457,13 @@ export function useDashboardState() {
     }
   }, [compressToThumbnail]);
 
+  /** Update any editable fields on an item */
+  const updateItem = useCallback((id: string, updates: Partial<Pick<DashboardItem, "query" | "sizeClass" | "condition" | "weightLbs" | "notes">>) => {
+    setItems(prev => prev.map(it =>
+      it.id === id ? { ...it, ...updates } : it
+    ));
+  }, []);
+
   const editSoldPrice = useCallback((id: string, soldPrice: number | undefined) => {
     setItems(prev => prev.map(it =>
       it.id === id && it.status === "sold"
@@ -490,6 +497,7 @@ export function useDashboardState() {
     markAsSold,
     undoSold,
     editSoldPrice,
+    updateItem,
     addPhotoItem,
     addPhotoToItem,
     confirmIdentity,

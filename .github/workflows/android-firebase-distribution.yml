@@ -1,20 +1,25 @@
 # ============================================================================
-# Firebase App Distribution — Android APK
+# Firebase App Distribution — Signed Android APK
 # ============================================================================
 #
-# Builds the Capacitor Android APK and uploads it to Firebase App Distribution
-# for tester access. Triggers on push to the deploy/replit branch.
+# Builds a signed release APK and uploads it to Firebase App Distribution.
+# Triggers on push to the deploy/replit branch.
 #
 # Required GitHub Secrets:
-#   FIREBASE_APP_ID_ANDROID    — Firebase App ID (looks like 1:123456:android:abcdef)
-#   FIREBASE_SERVICE_ACCOUNT_JSON — Full JSON content of a Firebase service account key
-#   FIREBASE_TESTERS           — Comma-separated tester emails (e.g. "a@b.com, c@d.com")
+#   FIREBASE_APP_ID_ANDROID       — Firebase App ID (1:xxxx:android:xxxx)
+#   FIREBASE_SERVICE_ACCOUNT_JSON — Full JSON of Firebase service account key
+#   FIREBASE_TESTERS              — Comma-separated tester emails
+#   ANDROID_KEYSTORE_BASE64       — Base64-encoded release keystore (.jks)
+#   ANDROID_KEY_ALIAS             — Key alias inside the keystore
+#   ANDROID_KEYSTORE_PASSWORD     — Keystore password
+#   ANDROID_KEY_PASSWORD          — Key password
 #
-# APK is built at:
-#   client/android/app/build/outputs/apk/debug/app-debug.apk
+# Versioning:
+#   versionCode = GitHub run number (auto-incrementing)
+#   versionName = "1.0.<run_number>"
 #
-# The service account JSON is written to a temp file at runtime and deleted
-# after upload. It is NEVER committed to the repo.
+# APK output:
+#   client/android/app/build/outputs/apk/release/app-release.apk
 # ============================================================================
 
 name: Firebase App Distribution
@@ -25,7 +30,7 @@ on:
 
 jobs:
   build-and-distribute:
-    name: Build APK & Upload to Firebase
+    name: Build Signed APK & Distribute
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,12 +38,12 @@ jobs:
 
     steps:
       # ------------------------------------------------------------------
-      # 1. Checkout repo
+      # 1. Checkout
       # ------------------------------------------------------------------
       - uses: actions/checkout@v4
 
       # ------------------------------------------------------------------
-      # 2. Set up Node.js 22 for building the web app
+      # 2. Node.js 22 (for Vite build + Capacitor sync)
       # ------------------------------------------------------------------
       - uses: actions/setup-node@v4
         with:
@@ -47,7 +52,7 @@ jobs:
           cache-dependency-path: client/package-lock.json
 
       # ------------------------------------------------------------------
-      # 3. Set up Java 21 (required by Android Gradle)
+      # 3. Java 21 (for Gradle/Android build)
       # ------------------------------------------------------------------
       - uses: actions/setup-java@v4
         with:
@@ -61,75 +66,99 @@ jobs:
         run: npm ci
 
       # ------------------------------------------------------------------
-      # 5. Build the web app and sync to Capacitor Android project
-      #    This runs: vite build → npx cap sync android
+      # 5. Build web app and sync to Capacitor Android
       # ------------------------------------------------------------------
       - name: Build web app and sync to Android
         run: npm run cap:build
 
       # ------------------------------------------------------------------
-      # 6. Build the debug APK via Gradle
-      #    Output: client/android/app/build/outputs/apk/debug/app-debug.apk
+      # 6. Decode release keystore from base64 secret
+      #    Written to RUNNER_TEMP — ephemeral, cleaned up after job.
       # ------------------------------------------------------------------
-      - name: Build debug APK
-        working-directory: client/android
-        run: ./gradlew assembleDebug
+      - name: Decode release keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
 
       # ------------------------------------------------------------------
-      # 7. Verify the APK was actually produced (fail fast if missing)
+      # 7. Write keystore.properties for Gradle signing config
+      #    Gradle reads this file to configure the release signingConfig.
       # ------------------------------------------------------------------
-      - name: Verify APK exists
+      - name: Write keystore.properties
         run: |
-          APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+          cat > android/app/keystore.properties << PROPS
+          storeFile=${{ runner.temp }}/release.jks
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          PROPS
+
+      # ------------------------------------------------------------------
+      # 8. Build signed release APK
+      #    VERSION_CODE and VERSION_NAME are read by build.gradle.
+      #    versionCode = run_number (auto-incrementing integer)
+      #    versionName = "1.0.<run_number>" (human-readable)
+      # ------------------------------------------------------------------
+      - name: Build signed release APK
+        working-directory: client/android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: "1.0.${{ github.run_number }}"
+        run: ./gradlew assembleRelease
+
+      # ------------------------------------------------------------------
+      # 9. Verify signed APK exists
+      # ------------------------------------------------------------------
+      - name: Verify release APK
+        run: |
+          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
           if [ ! -f "$APK_PATH" ]; then
-            echo "::error::APK not found at $APK_PATH"
+            echo "::error::Release APK not found at $APK_PATH"
             exit 1
           fi
           echo "APK size: $(du -h "$APK_PATH" | cut -f1)"
 
       # ------------------------------------------------------------------
-      # 8. Install Firebase CLI (used for App Distribution upload)
+      # 10. Install Firebase CLI
       # ------------------------------------------------------------------
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
 
       # ------------------------------------------------------------------
-      # 9. Write service account JSON to a temp file
-      #    RUNNER_TEMP is an ephemeral directory that is cleaned up after
-      #    each job — the key never persists on the runner.
+      # 11. Write Firebase service account key
       # ------------------------------------------------------------------
-      - name: Write service account key
+      - name: Write Firebase service account key
         run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > "$RUNNER_TEMP/firebase-sa.json"
 
       # ------------------------------------------------------------------
-      # 10. Upload APK to Firebase App Distribution
-      #     --app:     Firebase App ID (from secrets)
-      #     --testers: comma-separated email list (from secrets)
-      #     --token is NOT used; we authenticate via service account
+      # 12. Upload to Firebase App Distribution
+      #     Testers receive email notification with download link.
+      #     Release notes include branch, commit, run, and version.
       # ------------------------------------------------------------------
       - name: Upload to Firebase App Distribution
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
         run: |
           firebase appdistribution:distribute \
-            android/app/build/outputs/apk/debug/app-debug.apk \
+            android/app/build/outputs/apk/release/app-release.apk \
             --app "${{ secrets.FIREBASE_APP_ID_ANDROID }}" \
             --testers "${{ secrets.FIREBASE_TESTERS }}" \
-            --release-notes "Branch: ${{ github.ref_name }} | Commit: ${{ github.sha }} | Run: #${{ github.run_number }}"
+            --release-notes "v1.0.${{ github.run_number }} | Branch: ${{ github.ref_name }} | Commit: ${{ github.sha }} | Run: #${{ github.run_number }}"
 
       # ------------------------------------------------------------------
-      # 11. Clean up service account key (belt + suspenders with RUNNER_TEMP)
+      # 13. Clean up all secrets from runner
       # ------------------------------------------------------------------
       - name: Clean up credentials
         if: always()
-        run: rm -f "$RUNNER_TEMP/firebase-sa.json"
+        run: |
+          rm -f "$RUNNER_TEMP/release.jks"
+          rm -f "$RUNNER_TEMP/firebase-sa.json"
+          rm -f android/app/keystore.properties
 
       # ------------------------------------------------------------------
-      # 12. Also upload APK as a GitHub artifact for manual download
+      # 14. Upload APK as GitHub artifact (backup download)
       # ------------------------------------------------------------------
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pcs-moveiq-firebase-dist
-          path: client/android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 14
+          name: pcs-moveiq-v1.0.${{ github.run_number }}
+          path: client/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
