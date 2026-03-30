@@ -16,6 +16,7 @@ import { ProjectDetailView } from "./components/ProjectDetailView";
 import { ProjectForm } from "./components/ProjectForm";
 import { ProjectList } from "./components/ProjectList";
 import { PricingAnalysis } from "./components/PricingAnalysis";
+import { SellDashboard } from "./components/dashboard/SellDashboard";
 import { ProviderSettings } from "./components/ProviderSettings";
 import { RoomDetailView } from "./components/RoomDetailView";
 import "./App.css";
@@ -106,6 +107,10 @@ function PricingRoute() {
   return <PricingAnalysis onBack={() => navigate("/")} />;
 }
 
+function DashboardRoute() {
+  return <SellDashboard />;
+}
+
 function AuthedApp({ user, onLogout, onUserUpdate }: AuthedAppProps) {
   const navigate = useNavigate();
 
@@ -116,6 +121,7 @@ function AuthedApp({ user, onLogout, onUserUpdate }: AuthedAppProps) {
         <Route path="projects/:projectId" element={<ProjectRoute />} />
         <Route path="projects/:projectId/rooms/:roomId" element={<RoomRoute />} />
         <Route path="pricing" element={<PricingRoute />} />
+        <Route path="dashboard" element={<DashboardRoute />} />
         <Route path="profile" element={<ProfileView user={user} onBack={() => navigate(-1)} onUpdate={onUserUpdate} />} />
         <Route path="settings" element={<ProviderSettings onBack={() => navigate(-1)} />} />
       </Route>

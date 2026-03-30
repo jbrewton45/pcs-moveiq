@@ -1,20 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
-import type { EbayAnalysisResult } from "../types";
-
-function healthLabel(health: string): string {
-  switch (health) {
-    case "strong": return "Strong market";
-    case "moderate": return "Moderate market";
-    case "weak": return "Weak market";
-    case "insufficient": return "Insufficient data";
-    default: return health;
-  }
-}
-
-function formatPrice(n: number): string {
-  return n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-}
+import type { EbayAnalysisResult, SellPriorityResult } from "../types";
+import { formatPrice, healthLabel, BUCKET_DISPLAY, BUCKET_CSS } from "./shared/pricing-helpers";
 
 interface GroupCardProps {
   group: EbayAnalysisResult["groups"][number];
@@ -106,6 +93,158 @@ function GroupCard({ group }: GroupCardProps) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Urgency Card
+// ---------------------------------------------------------------------------
+
+function UrgencyCard({ priority }: { priority: SellPriorityResult }) {
+  const { urgency, channels, pricing } = priority;
+  const cssClass = BUCKET_CSS[urgency.bucket] ?? "minimal";
+  const displayLabel = BUCKET_DISPLAY[urgency.bucket] ?? urgency.bucket;
+
+  return (
+    <div className={`pcs-urgency pcs-urgency--${cssClass}`}>
+      <div className="pcs-urgency__header">
+        <div className="pcs-urgency__badge-row">
+          <span className={`pa-badge pa-badge--urgency-${cssClass}`}>
+            {displayLabel}
+          </span>
+          <span className="pcs-urgency__score">
+            Score: {urgency.score}/100
+          </span>
+        </div>
+        {urgency.daysUntilPCS !== null && (
+          <span className="pcs-urgency__days">
+            {urgency.daysUntilPCS} day{urgency.daysUntilPCS === 1 ? "" : "s"} until PCS
+          </span>
+        )}
+      </div>
+
+      <p className="pcs-urgency__headline">{urgency.headline}</p>
+
+      {pricing.recommendedPrice !== null && pricing.originalTiers && (
+        <div className="pcs-urgency__price-row">
+          <span className="pcs-urgency__rec-price">
+            ${formatPrice(pricing.recommendedPrice)}
+          </span>
+          <span className="pcs-urgency__price-label">Recommended Price</span>
+        </div>
+      )}
+
+      <div className="pcs-urgency__strategy">
+        <span className="pa-strategy__label">Pricing strategy</span>
+        <span className="pa-strategy__text">{pricing.pricingStrategy}</span>
+      </div>
+
+      {channels.length > 0 && (
+        <div className="pcs-urgency__channels">
+          <span className="pcs-urgency__channels-label">Where to sell</span>
+          <div className="pcs-urgency__channel-list">
+            {channels.map((ch) => (
+              <div
+                key={ch.channel}
+                className={`pcs-channel ${ch.fits ? "" : "pcs-channel--no-fit"}`}
+              >
+                <div className="pcs-channel__header">
+                  <span className="pcs-channel__rank">#{ch.rank}</span>
+                  <span className="pcs-channel__name">{ch.channel}</span>
+                  <span className="pcs-channel__speed">{ch.estimatedDaysToSell}</span>
+                </div>
+                <p className="pcs-channel__reason">{ch.reason}</p>
+                {!ch.fits && (
+                  <span className="pcs-channel__warning">May not complete before PCS</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <details className="pcs-urgency__reasoning-details">
+        <summary className="pcs-urgency__reasoning-toggle">Scoring breakdown</summary>
+        <ul className="pcs-urgency__reasoning-list">
+          {urgency.reasoning.map((r, i) => (
+            <li key={i}>{r}</li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PCS Context Panel
+// ---------------------------------------------------------------------------
+
+interface PcsContextProps {
+  pcsDate: string;
+  onPcsDateChange: (v: string) => void;
+  sizeClass: string;
+  onSizeClassChange: (v: string) => void;
+  userGoal: string;
+  onUserGoalChange: (v: string) => void;
+  disabled: boolean;
+}
+
+function PcsContextPanel({
+  pcsDate, onPcsDateChange,
+  sizeClass, onSizeClassChange,
+  userGoal, onUserGoalChange,
+  disabled,
+}: PcsContextProps) {
+  return (
+    <div className="pcs-context">
+      <span className="pcs-context__label">PCS Context (optional)</span>
+      <div className="pcs-context__fields">
+        <label className="pcs-context__field">
+          <span className="pcs-context__field-label">Move date</span>
+          <input
+            type="date"
+            className="pcs-context__input"
+            value={pcsDate}
+            onChange={(e) => onPcsDateChange(e.target.value)}
+            disabled={disabled}
+          />
+        </label>
+        <label className="pcs-context__field">
+          <span className="pcs-context__field-label">Size</span>
+          <select
+            className="pcs-context__select"
+            value={sizeClass}
+            onChange={(e) => onSizeClassChange(e.target.value)}
+            disabled={disabled}
+          >
+            <option value="">Any</option>
+            <option value="SMALL">Small</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="LARGE">Large</option>
+            <option value="OVERSIZED">Oversized</option>
+          </select>
+        </label>
+        <label className="pcs-context__field">
+          <span className="pcs-context__field-label">Goal</span>
+          <select
+            className="pcs-context__select"
+            value={userGoal}
+            onChange={(e) => onUserGoalChange(e.target.value)}
+            disabled={disabled}
+          >
+            <option value="">Balanced</option>
+            <option value="MAXIMIZE_CASH">Maximize Cash</option>
+            <option value="REDUCE_STRESS">Reduce Stress</option>
+            <option value="REDUCE_SHIPMENT_BURDEN">Reduce Shipment</option>
+            <option value="FIT_SMALLER_HOME">Fit Smaller Home</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main Component
+// ---------------------------------------------------------------------------
+
 interface PricingAnalysisProps {
   onBack: () => void;
 }
@@ -114,7 +253,17 @@ export function PricingAnalysis({ onBack }: PricingAnalysisProps) {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // PCS context fields
+  const [pcsDate, setPcsDate] = useState("");
+  const [sizeClass, setSizeClass] = useState("");
+  const [userGoal, setUserGoal] = useState("");
+
+  // Results
   const [result, setResult] = useState<EbayAnalysisResult | null>(null);
+  const [priority, setPriority] = useState<SellPriorityResult | null>(null);
+
+  const hasPcsContext = pcsDate !== "" || sizeClass !== "" || userGoal !== "";
 
   async function handleSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -124,10 +273,24 @@ export function PricingAnalysis({ onBack }: PricingAnalysisProps) {
     setLoading(true);
     setError("");
     setResult(null);
+    setPriority(null);
 
     try {
-      const data = await api.analyzeEbayPricing(trimmed);
-      setResult(data);
+      if (hasPcsContext) {
+        // Use priority endpoint when PCS context is provided
+        const data = await api.getSellPriority({
+          query: trimmed,
+          pcsDate: pcsDate || undefined,
+          sizeClass: sizeClass || undefined,
+          userGoal: userGoal || undefined,
+        });
+        setPriority(data);
+        setResult(data.ebayAnalysis);
+      } else {
+        // Plain analysis when no PCS context
+        const data = await api.analyzeEbayPricing(trimmed);
+        setResult(data);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
@@ -145,6 +308,7 @@ export function PricingAnalysis({ onBack }: PricingAnalysisProps) {
         <h2 className="section-heading">eBay Price Analysis</h2>
         <p className="pa-page-subtitle">
           Search any item to get real-time pricing data and comparable listings from eBay.
+          {" "}Add your PCS date for sell-priority recommendations.
         </p>
       </div>
 
@@ -160,19 +324,36 @@ export function PricingAnalysis({ onBack }: PricingAnalysisProps) {
             disabled={loading}
           />
           <button className="pa-search__btn" type="submit" disabled={loading}>
-            {loading ? "Analyzing..." : "Analyze"}
+            {loading ? "Analyzing..." : hasPcsContext ? "Analyze + Priority" : "Analyze"}
           </button>
         </form>
       </div>
+
+      <PcsContextPanel
+        pcsDate={pcsDate}
+        onPcsDateChange={setPcsDate}
+        sizeClass={sizeClass}
+        onSizeClassChange={setSizeClass}
+        userGoal={userGoal}
+        onUserGoalChange={setUserGoal}
+        disabled={loading}
+      />
 
       {error && <p className="form-error">{error}</p>}
 
       {loading && (
         <div className="pa-loading">
           <div className="pa-loading__bar" />
-          <p className="pa-loading__text">Fetching eBay listings and analyzing pricing&hellip;</p>
+          <p className="pa-loading__text">
+            {hasPcsContext
+              ? "Analyzing pricing and computing sell priority\u2026"
+              : "Fetching eBay listings and analyzing pricing\u2026"}
+          </p>
         </div>
       )}
+
+      {/* Urgency card — shown above analysis when PCS context present */}
+      {priority && <UrgencyCard priority={priority} />}
 
       {result && (
         <div className="pa-results">
@@ -220,7 +401,8 @@ export function PricingAnalysis({ onBack }: PricingAnalysisProps) {
 
             <p className="pa-result__summary">{result.analysis.summary}</p>
 
-            {result.analysis.recommendedListingStrategy && (
+            {/* Only show generic strategy when NOT in priority mode */}
+            {!priority && result.analysis.recommendedListingStrategy && (
               <div className="pa-strategy">
                 <span className="pa-strategy__label">Listing strategy</span>
                 <span className="pa-strategy__text">

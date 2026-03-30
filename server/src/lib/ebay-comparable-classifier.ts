@@ -59,9 +59,10 @@ export function classifyListing(
     relevanceScore = 0.9;
   }
 
-  // Noise penalty
+  // Noise filter — exclude listings with excessive noise tokens
   if (parsed.flags.noise.length > 3) {
-    relevanceScore = Math.max(relevanceScore - 0.1, 0);
+    listingClass = "noise";
+    relevanceScore = 0.05;
     flags.push("high_noise");
   }
 

@@ -181,6 +181,39 @@ export interface EbayAnalysisResult {
   excluded: { count: number; reasons: string[] };
 }
 
+export type UrgencyBucket =
+  | "SELL_IMMEDIATELY"
+  | "SELL_THIS_WEEK"
+  | "SELL_SOON"
+  | "PLAN_TO_SELL"
+  | "LOW_URGENCY"
+  | "NOT_WORTH_SELLING";
+
+export interface SellPriorityResult {
+  urgency: {
+    bucket: UrgencyBucket;
+    score: number;
+    daysUntilPCS: number | null;
+    daysUntilPackout: number | null;
+    adjustedDaysToPCS: number | null;
+    headline: string;
+    reasoning: string[];
+  };
+  channels: Array<{
+    channel: string;
+    rank: number;
+    reason: string;
+    estimatedDaysToSell: string;
+    fits: boolean;
+  }>;
+  pricing: {
+    recommendedPrice: number | null;
+    pricingStrategy: string;
+    originalTiers: { fastSale: number; fairMarket: number; maxReach: number } | null;
+  };
+  ebayAnalysis: EbayAnalysisResult;
+}
+
 export interface ProjectWorkspace {
   project: Project;
   rooms: Room[];

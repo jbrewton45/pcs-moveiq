@@ -2666,6 +2666,276 @@
   .pa-excluded__reason { background: #1f2937; color: #9ca3af; }
 }
 
+/* ============================================================
+   PCS Context Panel
+   ============================================================ */
+
+.pcs-context {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.pcs-context__label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.pcs-context__fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--space-3);
+}
+
+@media (max-width: 480px) {
+  .pcs-context__fields {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+}
+
+.pcs-context__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pcs-context__field-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pcs-context__input,
+.pcs-context__select {
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.8rem;
+  font-family: var(--font-body);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.pcs-context__input:focus,
+.pcs-context__select:focus {
+  outline: none;
+  border-color: var(--signal);
+  box-shadow: 0 0 0 2px rgba(221, 107, 32, 0.15);
+}
+
+/* ============================================================
+   PCS Urgency Card
+   ============================================================ */
+
+.pcs-urgency {
+  margin-top: var(--space-4);
+  padding: var(--space-5);
+  background: var(--bg-elevated);
+  border: 2px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+}
+
+.pcs-urgency--critical { border-color: var(--danger); }
+.pcs-urgency--high     { border-color: var(--warn); }
+.pcs-urgency--moderate { border-color: var(--signal); }
+.pcs-urgency--low      { border-color: var(--ok); }
+.pcs-urgency--minimal  { border-color: var(--border-soft); }
+.pcs-urgency--donate   { border-color: var(--text-secondary); }
+
+.pcs-urgency__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.pcs-urgency__badge-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pcs-urgency__score {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pcs-urgency__days {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+/* Urgency badges */
+.pa-badge--urgency-critical { background: #fef2f2; color: #b91c1c; }
+.pa-badge--urgency-high     { background: #fffbeb; color: #92400e; }
+.pa-badge--urgency-moderate { background: #fff7ed; color: #9a3412; }
+.pa-badge--urgency-low      { background: #f0fdf4; color: #15803d; }
+.pa-badge--urgency-minimal  { background: #f3f4f6; color: #4b5563; }
+.pa-badge--urgency-donate   { background: #f3f4f6; color: #4b5563; }
+
+.pcs-urgency__headline {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-primary);
+  margin: 0 0 var(--space-3);
+}
+
+.pcs-urgency__price-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.pcs-urgency__rec-price {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--signal), #e8590c);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.pcs-urgency__price-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.pcs-urgency__strategy {
+  padding: var(--space-3);
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-4);
+}
+
+/* Channels */
+.pcs-urgency__channels {
+  margin-bottom: var(--space-3);
+}
+
+.pcs-urgency__channels-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.pcs-urgency__channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.pcs-channel {
+  padding: var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+
+.pcs-channel--no-fit {
+  opacity: 0.7;
+  border-style: dashed;
+}
+
+.pcs-channel__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 2px;
+}
+
+.pcs-channel__rank {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: var(--signal);
+}
+
+.pcs-channel__name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.pcs-channel__speed {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pcs-channel__reason {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.pcs-channel__warning {
+  display: inline-block;
+  margin-top: var(--space-1);
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+/* Scoring breakdown */
+.pcs-urgency__reasoning-details {
+  margin-top: var(--space-2);
+}
+
+.pcs-urgency__reasoning-toggle {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: var(--space-1) 0;
+}
+
+.pcs-urgency__reasoning-toggle:hover {
+  color: var(--signal);
+}
+
+.pcs-urgency__reasoning-list {
+  margin: var(--space-2) 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* Dark mode urgency overrides */
+@media (prefers-color-scheme: dark) {
+  .pa-badge--urgency-critical { background: #450a0a; color: #fca5a5; }
+  .pa-badge--urgency-high     { background: #451a03; color: #fcd34d; }
+  .pa-badge--urgency-moderate { background: #431407; color: #fb923c; }
+  .pa-badge--urgency-low      { background: #052e16; color: #86efac; }
+  .pa-badge--urgency-minimal  { background: #1f2937; color: #9ca3af; }
+  .pa-badge--urgency-donate   { background: #1f2937; color: #9ca3af; }
+}
+
 /* Walkthrough status */
 .voice-capture__walkthrough-status {
   display: flex;

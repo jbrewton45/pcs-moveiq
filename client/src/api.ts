@@ -1,4 +1,4 @@
-import type { Project, Room, Item, Comparable, ProjectWorkspace, UserPublic, EbayAnalysisResult } from "./types";
+import type { Project, Room, Item, Comparable, ProjectWorkspace, UserPublic, EbayAnalysisResult, SellPriorityResult } from "./types";
 
 const BASE = "/api";
 
@@ -199,6 +199,23 @@ export const api = {
     if (limit) params.set("limit", String(limit));
     return request<EbayAnalysisResult>(`/ebay/analyze?${params.toString()}`);
   },
+
+  getSellPriority: (params: {
+    query: string;
+    limit?: number;
+    pcsDate?: string;
+    packoutDate?: string;
+    condition?: string;
+    sizeClass?: string;
+    userGoal?: string;
+    weightLbs?: number;
+    sentimentalFlag?: boolean;
+    region?: string;
+  }) =>
+    request<SellPriorityResult>("/ebay/analyze/priority", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
 
   parseVoiceWithPhoto: (transcript: string, photo: File, roomType?: string) => {
     const form = new FormData();
