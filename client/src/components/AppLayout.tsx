@@ -12,6 +12,7 @@ function tabClass(isActive: boolean): string {
 function titleForPath(pathname: string): string {
   if (pathname.startsWith("/projects/")) return "Project Workspace";
   if (pathname.startsWith("/projects")) return "Projects";
+  if (pathname.startsWith("/pricing")) return "Price Analysis";
   if (pathname.startsWith("/profile")) return "Profile";
   if (pathname.startsWith("/settings")) return "Settings";
   return "PCS MoveIQ";
@@ -42,6 +43,9 @@ export function AppLayout({ userName, onLogout }: Props) {
       <nav className="tabbar" aria-label="Primary">
         <NavLink to="/" end className={({ isActive }) => tabClass(isActive)}>
           Projects
+        </NavLink>
+        <NavLink to="/pricing" className={({ isActive }) => tabClass(isActive)}>
+          Pricing
         </NavLink>
         <NavLink to="/profile" className={({ isActive }) => tabClass(isActive)}>
           Profile

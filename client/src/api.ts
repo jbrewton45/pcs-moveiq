@@ -1,4 +1,4 @@
-import type { Project, Room, Item, Comparable, ProjectWorkspace, UserPublic } from "./types";
+import type { Project, Room, Item, Comparable, ProjectWorkspace, UserPublic, EbayAnalysisResult } from "./types";
 
 const BASE = "/api";
 
@@ -193,6 +193,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ transcript, roomType }),
     }),
+
+  analyzeEbayPricing: (query: string, limit?: number) => {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    return request<EbayAnalysisResult>(`/ebay/analyze?${params.toString()}`);
+  },
 
   parseVoiceWithPhoto: (transcript: string, photo: File, roomType?: string) => {
     const form = new FormData();

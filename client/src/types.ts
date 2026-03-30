@@ -132,6 +132,55 @@ export interface Item {
   updatedAt: string;
 }
 
+export interface EbayAnalysisResult {
+  query: string;
+  analysis: {
+    canonicalQuery: string;
+    marketHealth: "strong" | "moderate" | "weak" | "insufficient";
+    confidenceScore: number;
+    confidenceLabel: "high" | "medium" | "low" | "insufficient";
+    pricingTiers: { fastSale: number; fairMarket: number; maxReach: number } | null;
+    recommendedListingStrategy: string;
+    summary: string;
+  };
+  groups: Array<{
+    groupKey: string;
+    label: string;
+    matchCount: number;
+    confidenceScore: number;
+    priceStats: {
+      min: number;
+      p25: number;
+      median: number;
+      p75: number;
+      max: number;
+      mean: number;
+      count: number;
+    };
+    derivedPricing: { fastSale: number; fairMarket: number; maxReach: number };
+    reasoning: string[];
+    items: Array<{
+      itemId: string;
+      title: string;
+      price: number;
+      currency: string;
+      condition: string;
+      itemWebUrl: string | null;
+      imageUrl: string | null;
+      sellerUsername: string | null;
+      shippingCost: number | null;
+      itemLocation: string | null;
+      classification: {
+        listingClass: string;
+        relevanceScore: number;
+        configTier: string;
+        flags: string[];
+      };
+    }>;
+  }>;
+  excluded: { count: number; reasons: string[] };
+}
+
 export interface ProjectWorkspace {
   project: Project;
   rooms: Room[];

@@ -15,6 +15,7 @@ import { ProfileView } from "./components/ProfileView";
 import { ProjectDetailView } from "./components/ProjectDetailView";
 import { ProjectForm } from "./components/ProjectForm";
 import { ProjectList } from "./components/ProjectList";
+import { PricingAnalysis } from "./components/PricingAnalysis";
 import { ProviderSettings } from "./components/ProviderSettings";
 import { RoomDetailView } from "./components/RoomDetailView";
 import "./App.css";
@@ -100,6 +101,11 @@ interface AuthedAppProps {
   onUserUpdate: (next: UserPublic) => void;
 }
 
+function PricingRoute() {
+  const navigate = useNavigate();
+  return <PricingAnalysis onBack={() => navigate("/")} />;
+}
+
 function AuthedApp({ user, onLogout, onUserUpdate }: AuthedAppProps) {
   const navigate = useNavigate();
 
@@ -109,6 +115,7 @@ function AuthedApp({ user, onLogout, onUserUpdate }: AuthedAppProps) {
         <Route index element={<HomeRoute />} />
         <Route path="projects/:projectId" element={<ProjectRoute />} />
         <Route path="projects/:projectId/rooms/:roomId" element={<RoomRoute />} />
+        <Route path="pricing" element={<PricingRoute />} />
         <Route path="profile" element={<ProfileView user={user} onBack={() => navigate(-1)} onUpdate={onUserUpdate} />} />
         <Route path="settings" element={<ProviderSettings onBack={() => navigate(-1)} />} />
       </Route>
