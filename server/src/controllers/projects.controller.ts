@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { createProject, deleteProject, getProjectForUser, listProjects, updateProject } from "../services/projects.service.js";
-import { getProjectSummary, getProjectWeightSummary, getPackingList } from "../services/items.service.js";
+import { getProjectSummary, getProjectWeightSummary, getPackingList, listItemsByProject } from "../services/items.service.js";
 import { listRoomsByProject } from "../services/rooms.service.js";
 import { CreateProjectSchema, UpdateProjectSchema } from "../validation/schemas.js";
 
@@ -50,6 +50,27 @@ export async function getProjectExport(req: Request, res: Response) {
     project,
     rooms,
     packingList,
+  });
+}
+
+export async function getProjectWorkspace(req: Request, res: Response) {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const project = await getProjectForUser(id, req.userId!);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+
+  const [rooms, items, summary, weight] = await Promise.all([
+    listRoomsByProject(id),
+    listItemsByProject(id),
+    getProjectSummary(id),
+    getProjectWeightSummary(id),
+  ]);
+
+  return res.status(200).json({
+    project,
+    rooms,
+    items,
+    summary,
+    weight,
   });
 }
 

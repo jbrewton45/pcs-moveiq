@@ -131,3 +131,16 @@ export interface Item {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface ProjectWorkspace {
+  project: Project;
+  rooms: Room[];
+  items: Item[];
+  summary: Record<string, number>;
+  weight: {
+    totalWeight: number;
+    roomWeights: Record<string, number>;
+    itemsWithWeight: number;
+    itemsWithoutWeight: number;
+  };
+}
