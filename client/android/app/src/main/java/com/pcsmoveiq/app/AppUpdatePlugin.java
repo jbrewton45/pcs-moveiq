@@ -9,7 +9,6 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import com.google.firebase.appdistribution.FirebaseAppDistribution;
-import com.google.firebase.appdistribution.UpdateStatus;
 
 /**
  * Capacitor plugin bridging Firebase App Distribution to the web layer.
@@ -123,16 +122,8 @@ public class AppUpdatePlugin extends Plugin {
             FirebaseAppDistribution fad = FirebaseAppDistribution.getInstance();
             fad.updateApp()
                 .addOnProgressListener(updateState -> {
-                    // Send progress events to the web layer
                     JSObject event = new JSObject();
-                    long total = updateState.getApkBytesTotal();
-                    long downloaded = updateState.getApkBytesDownloaded();
-                    event.put("status", updateState.getUpdateStatus().toString());
-                    event.put("bytesTotal", total);
-                    event.put("bytesDownloaded", downloaded);
-                    if (total > 0) {
-                        event.put("percent", Math.round((float) downloaded / total * 100));
-                    }
+                    event.put("status", String.valueOf(updateState.getUpdateStatus()));
                     notifyListeners("updateProgress", event);
                 })
                 .addOnSuccessListener(aVoid -> {
