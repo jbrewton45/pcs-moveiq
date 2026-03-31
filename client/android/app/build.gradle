@@ -23,7 +23,7 @@ android {
 
     // Release signing — reads from keystore.properties (written by CI from secrets)
     // or falls back gracefully for local debug builds.
-    def keystorePropsFile = rootProject.file("app/keystore.properties")
+    def keystorePropsFile = rootProject.file("keystore.properties")
     if (keystorePropsFile.exists()) {
         def keystoreProps = new Properties()
         keystoreProps.load(new FileInputStream(keystorePropsFile))

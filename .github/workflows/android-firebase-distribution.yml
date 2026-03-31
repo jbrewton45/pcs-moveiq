@@ -73,26 +73,34 @@ jobs:
 
       # ------------------------------------------------------------------
       # 6. Decode release keystore from base64 secret
-      #    Written to RUNNER_TEMP — ephemeral, cleaned up after job.
+      #    printf avoids echo's trailing newline corrupting the binary.
+      #    Written next to build.gradle so storeFile can be a relative path.
       # ------------------------------------------------------------------
       - name: Decode release keystore
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+        run: printf '%s' "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/release.jks
 
       # ------------------------------------------------------------------
-      # 7. Write keystore.properties for Gradle signing config
-      #    Gradle reads this file to configure the release signingConfig.
+      # 7. Verify keystore is readable (fail fast if secret is corrupt)
+      # ------------------------------------------------------------------
+      - name: Verify keystore
+        run: keytool -list -v -keystore android/release.jks -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" > /dev/null
+
+      # ------------------------------------------------------------------
+      # 8. Write keystore.properties for Gradle signing config
+      #    Placed at client/android/keystore.properties (rootProject dir).
+      #    storeFile is relative to the app module dir.
       # ------------------------------------------------------------------
       - name: Write keystore.properties
         run: |
-          cat > android/app/keystore.properties << PROPS
-          storeFile=${{ runner.temp }}/release.jks
+          cat > android/keystore.properties << PROPS
+          storeFile=../release.jks
           storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
           keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
           PROPS
 
       # ------------------------------------------------------------------
-      # 8. Build signed release APK
+      # 9. Build signed release APK (was step 8)
       #    VERSION_CODE and VERSION_NAME are read by build.gradle.
       #    versionCode = run_number (auto-incrementing integer)
       #    versionName = "1.0.<run_number>" (human-readable)
@@ -149,9 +157,9 @@ jobs:
       - name: Clean up credentials
         if: always()
         run: |
-          rm -f "$RUNNER_TEMP/release.jks"
+          rm -f android/release.jks
+          rm -f android/keystore.properties
           rm -f "$RUNNER_TEMP/firebase-sa.json"
-          rm -f android/app/keystore.properties
 
       # ------------------------------------------------------------------
       # 14. Upload APK as GitHub artifact (backup download)
