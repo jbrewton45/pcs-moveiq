@@ -5,6 +5,12 @@ const configuredApiOrigin = (import.meta.env.VITE_API_ORIGIN as string | undefin
 const apiOrigin = configuredApiOrigin ? configuredApiOrigin.replace(/\/$/, "") : "https://pcs-moveiq.replit.app";
 const BASE = Capacitor.isNativePlatform() ? `${apiOrigin}/api` : "/api";
 
+export function getUploadUrl(photoPath?: string): string | null {
+  if (!photoPath) return null;
+  const base = Capacitor.isNativePlatform() ? apiOrigin : "";
+  return `${base}/uploads/${photoPath}`;
+}
+
 let authToken: string | null = localStorage.getItem("moveiq_token");
 
 export function setToken(token: string | null) {
@@ -142,6 +148,27 @@ export const api = {
   },
 
   deleteItemPhoto: (id: string) => request<Item>(`/items/${id}/photo`, { method: "DELETE" }),
+
+  listItemPhotos: (id: string) =>
+    request<Array<{ id: string; itemId: string; photoPath: string; isPrimary: boolean; createdAt: string }>>(`/items/${id}/photos`),
+
+  addItemPhoto: (id: string, file: File) => {
+    const form = new FormData();
+    form.append("photo", file);
+    const headers: Record<string, string> = {};
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+    return fetch(`${BASE}/items/${id}/photos`, { method: "POST", body: form, headers })
+      .then(async res => {
+        if (!res.ok) throw new Error("Upload failed");
+        return res.json() as Promise<Item>;
+      });
+  },
+
+  deleteItemPhotoById: (id: string, photoId: string) =>
+    request<Item>(`/items/${id}/photos/${photoId}`, { method: "DELETE" }),
+
+  setItemPrimaryPhoto: (id: string, photoId: string) =>
+    request<Item>(`/items/${id}/photos/${photoId}/primary`, { method: "PUT" }),
 
   identifyItem: (id: string) => request<Item>(`/items/${id}/identify`, { method: "POST" }),
 

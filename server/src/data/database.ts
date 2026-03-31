@@ -101,5 +101,32 @@ export async function initializeSchema() {
       "soldStatus" TEXT,
       "createdAt" TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS item_photos (
+      id TEXT PRIMARY KEY,
+      "itemId" TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      "photoPath" TEXT NOT NULL,
+      "isPrimary" BOOLEAN NOT NULL DEFAULT FALSE,
+      "createdAt" TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS item_photos_item_id_idx ON item_photos ("itemId");
+    CREATE UNIQUE INDEX IF NOT EXISTS item_photos_primary_unique_idx ON item_photos ("itemId") WHERE "isPrimary" = TRUE;
+
+    INSERT INTO item_photos (id, "itemId", "photoPath", "isPrimary", "createdAt")
+    SELECT
+      CONCAT(i.id, '_legacy_photo'),
+      i.id,
+      i."photoPath",
+      TRUE,
+      COALESCE(i."updatedAt", i."createdAt")
+    FROM items i
+    WHERE i."photoPath" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM item_photos ip
+        WHERE ip."itemId" = i.id
+          AND ip."photoPath" = i."photoPath"
+      );
   `);
 }

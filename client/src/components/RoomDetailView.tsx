@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Item, ItemCondition, ItemStatus, SizeClass, Recommendation, Comparable, ComparableSource, ClarificationQuestion } from "../types";
-import { api } from "../api";
+import { api, getUploadUrl } from "../api";
 import { VoiceCapture } from "./VoiceCapture";
 import { BottomSheet } from "./ui/BottomSheet";
 import { ConfirmSheet } from "./ui/ConfirmSheet";
@@ -123,6 +123,11 @@ function isScannedItem(item: Item): boolean {
   );
 }
 
+function getPrimaryPhotoPath(item: Item): string | undefined {
+  const primary = item.photos?.find((p) => p.isPrimary) ?? item.photos?.[0];
+  return primary?.photoPath ?? item.photoPath;
+}
+
 // ---------- ConfigTierBadge ----------
 
 const CONFIG_TIER_LABELS: Record<string, { label: string; cls: string }> = {
@@ -185,9 +190,11 @@ function ItemReadCard({
   const [submittingClarifications, setSubmittingClarifications] = useState(false);
   const scannedItem = isScannedItem(item);
   const [expanded, setExpanded] = useState(!scannedItem);
+  const [showComparables, setShowComparables] = useState(false);
 
   useEffect(() => {
     setExpanded(!scannedItem);
+    setShowComparables(false);
   }, [item.id, scannedItem]);
 
   useEffect(() => {
@@ -237,12 +244,13 @@ function ItemReadCard({
       )}
       <div className={selectMode ? "item-card__content" : undefined}>
         <div className="item-card__header">
-          {item.photoPath && (
+          {getUploadUrl(getPrimaryPhotoPath(item)) && (
             <img
               className="item-card-thumb"
-              src={`/uploads/${item.photoPath}`}
+              src={getUploadUrl(getPrimaryPhotoPath(item)) ?? undefined}
               alt=""
               loading="lazy"
+              onError={(e) => { e.currentTarget.style.display = "none"; }}
             />
           )}
           <span className="item-card__name">{item.itemName}</span>
@@ -448,37 +456,48 @@ function ItemReadCard({
 
             {comparables.length > 0 && (
               <div className="comp-list">
-                <p className="comp-list__title">Comparables</p>
-                <SourceSummary comparables={comparables} />
-                {comparables.map(c => (
-                  <div key={c.id} className="comp-card">
-                    {c.thumbnailUrl && (
-                      <img className="comp-card__thumb" src={c.thumbnailUrl} alt="" loading="lazy" width={48} height={48} />
-                    )}
-                    <div className="comp-card__info">
-                      {c.url ? (
-                        <a className="comp-card__title comp-card__title-link" href={c.url} target="_blank" rel="noopener noreferrer">
-                          {c.title}
-                        </a>
-                      ) : (
-                        <span className="comp-card__title">{c.title}</span>
-                      )}
-                      <div className="comp-card__source-row">
-                        <span className={`comp-source-badge comp-source-badge--${c.source}`}>
-                          {SOURCE_LABEL[c.source]}
-                        </span>
+                <button
+                  type="button"
+                  className="comp-list__toggle"
+                  onClick={() => setShowComparables((v) => !v)}
+                >
+                  {showComparables ? "Hide Market Evidence" : "Show Market Evidence"} ({comparables.length})
+                </button>
+                {showComparables && (
+                  <>
+                    <p className="comp-list__title">Comparables</p>
+                    <SourceSummary comparables={comparables} />
+                    {comparables.map(c => (
+                      <div key={c.id} className="comp-card">
+                        {c.thumbnailUrl && (
+                          <img className="comp-card__thumb" src={c.thumbnailUrl} alt="" loading="lazy" width={48} height={48} />
+                        )}
+                        <div className="comp-card__info">
+                          {c.url ? (
+                            <a className="comp-card__title comp-card__title-link" href={c.url} target="_blank" rel="noopener noreferrer">
+                              {c.title}
+                            </a>
+                          ) : (
+                            <span className="comp-card__title">{c.title}</span>
+                          )}
+                          <div className="comp-card__source-row">
+                            <span className={`comp-source-badge comp-source-badge--${c.source}`}>
+                              {SOURCE_LABEL[c.source]}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="comp-card__right">
+                          <span className="comp-card__price">${c.price}</span>
+                          {c.soldStatus && (
+                            <span className={`comp-card__status comp-card__status--${c.soldStatus.toLowerCase()}`}>
+                              {c.soldStatus}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    <div className="comp-card__right">
-                      <span className="comp-card__price">${c.price}</span>
-                      {c.soldStatus && (
-                        <span className={`comp-card__status comp-card__status--${c.soldStatus.toLowerCase()}`}>
-                          {c.soldStatus}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                    ))}
+                  </>
+                )}
               </div>
             )}
           </>
@@ -507,11 +526,12 @@ function ItemReadCard({
 interface ItemEditFormProps {
   item: Item;
   onSave: () => void;
+  onRefresh: () => void;
   onCancel: () => void;
   onDelete: () => void;
 }
 
-function ItemEditForm({ item, onSave, onCancel, onDelete }: ItemEditFormProps) {
+function ItemEditForm({ item, onSave, onRefresh, onCancel, onDelete }: ItemEditFormProps) {
   const [itemName, setItemName] = useState(item.itemName);
   const [category, setCategory] = useState(item.category);
   const [condition, setCondition] = useState<ItemCondition>(item.condition);
@@ -525,6 +545,7 @@ function ItemEditForm({ item, onSave, onCancel, onDelete }: ItemEditFormProps) {
   const [formError, setFormError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [photoError, setPhotoError] = useState("");
+  const [photoActionInFlightId, setPhotoActionInFlightId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleSave(e: React.FormEvent) {
@@ -561,8 +582,8 @@ function ItemEditForm({ item, onSave, onCancel, onDelete }: ItemEditFormProps) {
     setUploading(true);
     setPhotoError("");
     try {
-      await api.uploadItemPhoto(item.id, file);
-      onSave(); // triggers refresh
+      await api.addItemPhoto(item.id, file);
+      onRefresh();
     } catch {
       setPhotoError("Upload failed. Try again.");
     } finally {
@@ -571,12 +592,16 @@ function ItemEditForm({ item, onSave, onCancel, onDelete }: ItemEditFormProps) {
     }
   }
 
-  async function handleRemovePhoto() {
+  async function handleRemovePhoto(photoId?: string) {
     setUploading(true);
     setPhotoError("");
     try {
-      await api.deleteItemPhoto(item.id);
-      onSave(); // triggers refresh
+      if (photoId) {
+        await api.deleteItemPhotoById(item.id, photoId);
+      } else {
+        await api.deleteItemPhoto(item.id);
+      }
+      onRefresh();
     } catch {
       setPhotoError("Failed to remove photo.");
     } finally {
@@ -584,29 +609,76 @@ function ItemEditForm({ item, onSave, onCancel, onDelete }: ItemEditFormProps) {
     }
   }
 
+  async function handleSetPrimary(photoId: string) {
+    setPhotoActionInFlightId(photoId);
+    setPhotoError("");
+    try {
+      await api.setItemPrimaryPhoto(item.id, photoId);
+      onRefresh();
+    } catch {
+      setPhotoError("Failed to set primary photo.");
+    } finally {
+      setPhotoActionInFlightId(null);
+    }
+  }
+
+  const photos = item.photos ?? (item.photoPath ? [{ id: "legacy", itemId: item.id, photoPath: item.photoPath, isPrimary: true, createdAt: item.createdAt }] : []);
+  const primaryPhotoPath = getPrimaryPhotoPath(item);
+
   return (
     <div className="item-card item-card--editing">
       <form className="item-edit-form" onSubmit={handleSave}>
         <div className="item-edit-photo-section">
-          {item.photoPath ? (
+          {primaryPhotoPath ? (
             <>
-              <img className="item-edit-photo-preview" src={`/uploads/${item.photoPath}`} alt="" />
-              <div className="item-edit-photo-actions">
-                <button type="button" className="btn-photo-replace" disabled={uploading}
-                  onClick={() => fileInputRef.current?.click()}>
-                  {uploading ? "Uploading..." : "Replace Photo"}
-                </button>
-                <button type="button" className="btn-photo-remove" disabled={uploading}
-                  onClick={handleRemovePhoto}>
-                  Remove
+              <img
+                className="item-edit-photo-preview"
+                src={getUploadUrl(primaryPhotoPath) ?? undefined}
+                alt=""
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+              />
+              <div className="item-edit-photo-actions item-edit-photo-actions--stacked">
+                <button type="button" className="btn-photo-replace" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
+                  {uploading ? "Uploading..." : "Add Photo"}
                 </button>
               </div>
             </>
           ) : (
-            <button type="button" className="btn-photo-replace" disabled={uploading}
-              onClick={() => fileInputRef.current?.click()}>
+            <button type="button" className="btn-photo-replace" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
               {uploading ? "Uploading..." : "Add Photo"}
             </button>
+          )}
+          {photos.length > 0 && (
+            <div className="item-photo-gallery" role="list">
+              {photos.map((photo) => (
+                <div key={photo.id} className={`item-photo-gallery__item ${photo.isPrimary ? "item-photo-gallery__item--primary" : ""}`} role="listitem">
+                  <img
+                    className="item-photo-gallery__thumb"
+                    src={getUploadUrl(photo.photoPath) ?? undefined}
+                    alt=""
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  />
+                  <div className="item-photo-gallery__actions">
+                    <button
+                      type="button"
+                      className="btn-photo-replace"
+                      disabled={uploading || photoActionInFlightId === photo.id || photo.isPrimary}
+                      onClick={() => void handleSetPrimary(photo.id)}
+                    >
+                      {photo.isPrimary ? "Primary" : photoActionInFlightId === photo.id ? "Saving..." : "Set Primary"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-photo-remove"
+                      disabled={uploading || photoActionInFlightId === photo.id}
+                      onClick={() => void handleRemovePhoto(photo.id === "legacy" ? undefined : photo.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
           <input
             ref={fileInputRef}
@@ -789,7 +861,12 @@ export function RoomDetailView({
 
   // Intake flow state
   const [showIntakeSheet, setShowIntakeSheet] = useState(false);
+  const [showAddItemOptions, setShowAddItemOptions] = useState(false);
   const [intakeMode, setIntakeMode] = useState<"manual" | "voice" | "walkthrough">("manual");
+  const [quickAddBusy, setQuickAddBusy] = useState(false);
+  const [quickAddError, setQuickAddError] = useState("");
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const [collapseScannedSignal, setCollapseScannedSignal] = useState(0);
   const [expandScannedSignal, setExpandScannedSignal] = useState(0);
 
@@ -872,6 +949,10 @@ export function RoomDetailView({
   function handleEditSave() {
     setRefreshKey((k) => k + 1);
     setEditingItemId(null);
+  }
+
+  function handleEditRefresh() {
+    setRefreshKey((k) => k + 1);
   }
 
   function handleEditDelete() {
@@ -1000,6 +1081,50 @@ export function RoomDetailView({
     setShowIntakeSheet(true);
   }
 
+  async function handlePhotoDrivenAdd(file: File) {
+    setQuickAddBusy(true);
+    setQuickAddError("");
+    try {
+      const created = await api.createItem({
+        projectId,
+        roomId,
+        itemName: "Scanned Item",
+        category: "Uncategorized",
+        condition: "GOOD",
+        sizeClass: "SMALL",
+        notes: undefined,
+        sentimentalFlag: false,
+        keepFlag: false,
+        willingToSell: true,
+      });
+
+      await api.uploadItemPhoto(created.id, file);
+      await api.identifyItem(created.id);
+      const result = await api.getItemPricing(created.id);
+      setComparables(prev => ({ ...prev, [created.id]: result.comparables }));
+      setShowAddItemOptions(false);
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setQuickAddError(err instanceof Error ? err.message : "Could not process image. Try again.");
+    } finally {
+      setQuickAddBusy(false);
+    }
+  }
+
+  async function handleCameraSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await handlePhotoDrivenAdd(file);
+    e.target.value = "";
+  }
+
+  async function handleGallerySelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await handlePhotoDrivenAdd(file);
+    e.target.value = "";
+  }
+
   return (
     <div>
       <button className="back-btn" onClick={onBack}>
@@ -1018,7 +1143,7 @@ export function RoomDetailView({
         <div className="section-heading-row">
           <h3 className="section-heading">Inventory</h3>
           <div className="section-heading-row__actions section-heading-row__actions--inventory">
-            <button className="sheet__btn sheet__btn--primary" type="button" onClick={() => openIntake("manual")}>
+            <button className="sheet__btn sheet__btn--primary room-add-primary" type="button" onClick={() => setShowAddItemOptions(true)}>
               Add Item
             </button>
             <button className="voice-capture-btn" type="button" onClick={() => openIntake("voice")}>
@@ -1156,6 +1281,61 @@ export function RoomDetailView({
           </div>
         )}
       </section>
+
+      <BottomSheet
+        open={showAddItemOptions}
+        onClose={() => {
+          if (!quickAddBusy) setShowAddItemOptions(false);
+        }}
+        title="Add Item"
+      >
+        <div className="add-item-sheet">
+          <button
+            type="button"
+            className="sheet__btn sheet__btn--primary add-item-sheet__option"
+            disabled={quickAddBusy}
+            onClick={() => cameraInputRef.current?.click()}
+          >
+            {quickAddBusy ? "Processing..." : "Take Photo"}
+          </button>
+          <button
+            type="button"
+            className="sheet__btn sheet__btn--secondary add-item-sheet__option"
+            disabled={quickAddBusy}
+            onClick={() => galleryInputRef.current?.click()}
+          >
+            Choose from Gallery
+          </button>
+          <button
+            type="button"
+            className="add-item-sheet__manual-link"
+            disabled={quickAddBusy}
+            onClick={() => {
+              setShowAddItemOptions(false);
+              openIntake("manual");
+            }}
+          >
+            Manual Entry
+          </button>
+          {quickAddError && <p className="form-error">{quickAddError}</p>}
+          <p className="add-item-sheet__hint">Photo flow runs identification, pricing, and recommendations automatically.</p>
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="sr-only"
+            onChange={(e) => void handleCameraSelect(e)}
+          />
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            onChange={(e) => void handleGallerySelect(e)}
+          />
+        </div>
+      </BottomSheet>
 
       <BottomSheet
         open={showIntakeSheet}
@@ -1311,6 +1491,7 @@ export function RoomDetailView({
           <ItemEditForm
             item={editedItem}
             onSave={handleEditSave}
+            onRefresh={handleEditRefresh}
             onCancel={() => setEditingItemId(null)}
             onDelete={() => setConfirmDeleteItem(editedItem)}
           />

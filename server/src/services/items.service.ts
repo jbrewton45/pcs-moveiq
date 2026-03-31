@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { query } from "../data/database.js";
-import type { Item, ItemCondition, ItemStatus, RecommendationResult, PricingContext, SizeClass } from "../types/domain.js";
+import type { Item, ItemCondition, ItemPhoto, ItemStatus, RecommendationResult, PricingContext, SizeClass } from "../types/domain.js";
 import type { MoveType, HousingAssumption } from "../types/domain.js";
 import { createId } from "../utils/id.js";
 import { rowToItem } from "../utils/converters.js";
@@ -30,6 +30,34 @@ interface UpdateItemInput {
   sentimentalFlag?: boolean;
   keepFlag?: boolean;
   willingToSell?: boolean;
+}
+
+function rowToItemPhoto(row: Record<string, unknown>): ItemPhoto {
+  return {
+    id: row.id as string,
+    itemId: row.itemId as string,
+    photoPath: row.photoPath as string,
+    isPrimary: !!row.isPrimary,
+    createdAt: row.createdAt as string,
+  };
+}
+
+async function listItemPhotos(itemId: string): Promise<ItemPhoto[]> {
+  const result = await query(
+    'SELECT id, "itemId", "photoPath", "isPrimary", "createdAt" FROM item_photos WHERE "itemId" = $1 ORDER BY "isPrimary" DESC, "createdAt" ASC',
+    [itemId]
+  );
+  return result.rows.map((r) => rowToItemPhoto(r as Record<string, unknown>));
+}
+
+async function hydrateItemPhotos(item: Item): Promise<Item> {
+  const photos = await listItemPhotos(item.id);
+  const primary = photos.find((p) => p.isPrimary) ?? photos[0];
+  return {
+    ...item,
+    photoPath: primary?.photoPath ?? item.photoPath,
+    photos,
+  };
 }
 
 function getConfidenceTier(confidence: number | undefined, hasEbay: boolean): "HIGH" | "MEDIUM" | "LOW" {
@@ -90,17 +118,21 @@ function deriveRecommendation(
 
 export async function listItemsByProject(projectId: string): Promise<Item[]> {
   const result = await query('SELECT * FROM items WHERE "projectId" = $1 ORDER BY "createdAt" ASC', [projectId]);
-  return result.rows.map(r => rowToItem(r as Record<string, unknown>));
+  const base = result.rows.map(r => rowToItem(r as Record<string, unknown>));
+  return Promise.all(base.map(hydrateItemPhotos));
 }
 
 export async function listItemsByRoom(roomId: string): Promise<Item[]> {
   const result = await query('SELECT * FROM items WHERE "roomId" = $1 ORDER BY "createdAt" ASC', [roomId]);
-  return result.rows.map(r => rowToItem(r as Record<string, unknown>));
+  const base = result.rows.map(r => rowToItem(r as Record<string, unknown>));
+  return Promise.all(base.map(hydrateItemPhotos));
 }
 
 async function getItemById(id: string): Promise<Item | undefined> {
   const result = await query('SELECT * FROM items WHERE id = $1', [id]);
-  return result.rows.length > 0 ? rowToItem(result.rows[0] as Record<string, unknown>) : undefined;
+  if (result.rows.length === 0) return undefined;
+  const base = rowToItem(result.rows[0] as Record<string, unknown>);
+  return hydrateItemPhotos(base);
 }
 
 export async function createItem(input: CreateItemInput): Promise<Item> {
@@ -181,11 +213,9 @@ export async function deleteItem(id: string): Promise<boolean> {
   const item = await getItemById(id);
   if (!item) return false;
 
-  if (item.photoPath) {
-    const filePath = path.join(process.cwd(), "uploads", item.photoPath);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+  for (const photo of item.photos ?? []) {
+    const filePath = path.join(process.cwd(), "uploads", photo.photoPath);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   }
 
   const result = await query('DELETE FROM items WHERE id = $1', [id]);
@@ -196,6 +226,11 @@ export async function setItemPhoto(id: string, photoPath: string): Promise<Item 
   const existing = await getItemById(id);
   if (!existing) return null;
   const now = new Date().toISOString();
+  await query('DELETE FROM item_photos WHERE "itemId" = $1', [id]);
+  await query(
+    'INSERT INTO item_photos (id, "itemId", "photoPath", "isPrimary", "createdAt") VALUES ($1, $2, $3, TRUE, $4)',
+    [createId("photo"), id, photoPath, now]
+  );
   await query('UPDATE items SET "photoPath" = $1, "updatedAt" = $2 WHERE id = $3', [photoPath, now, id]);
   return (await getItemById(id))!;
 }
@@ -204,13 +239,103 @@ export async function removeItemPhoto(id: string): Promise<Item | null> {
   const existing = await getItemById(id);
   if (!existing) return null;
   const now = new Date().toISOString();
-  await query('UPDATE items SET "photoPath" = NULL, "updatedAt" = $1 WHERE id = $2', [now, id]);
+  const primary = (existing.photos ?? []).find((p) => p.isPrimary) ?? existing.photos?.[0];
+  if (primary) {
+    await query('DELETE FROM item_photos WHERE id = $1 AND "itemId" = $2', [primary.id, id]);
+  }
+  const nextPrimary = await query(
+    'SELECT id, "photoPath" FROM item_photos WHERE "itemId" = $1 ORDER BY "createdAt" ASC LIMIT 1',
+    [id]
+  );
+  if (nextPrimary.rows.length > 0) {
+    const primaryId = (nextPrimary.rows[0] as { id: string }).id;
+    const primaryPath = (nextPrimary.rows[0] as { photoPath: string }).photoPath;
+    await query('UPDATE item_photos SET "isPrimary" = FALSE WHERE "itemId" = $1', [id]);
+    await query('UPDATE item_photos SET "isPrimary" = TRUE WHERE id = $1', [primaryId]);
+    await query('UPDATE items SET "photoPath" = $1, "updatedAt" = $2 WHERE id = $3', [primaryPath, now, id]);
+  } else {
+    await query('UPDATE items SET "photoPath" = NULL, "updatedAt" = $1 WHERE id = $2', [now, id]);
+  }
+  return (await getItemById(id))!;
+}
+
+export async function addItemPhoto(id: string, photoPath: string): Promise<Item | null> {
+  const existing = await getItemById(id);
+  if (!existing) return null;
+  const now = new Date().toISOString();
+  const shouldBePrimary = (existing.photos?.length ?? 0) === 0;
+  if (shouldBePrimary) {
+    await query('UPDATE item_photos SET "isPrimary" = FALSE WHERE "itemId" = $1', [id]);
+  }
+  await query(
+    'INSERT INTO item_photos (id, "itemId", "photoPath", "isPrimary", "createdAt") VALUES ($1, $2, $3, $4, $5)',
+    [createId("photo"), id, photoPath, shouldBePrimary, now]
+  );
+  if (shouldBePrimary) {
+    await query('UPDATE items SET "photoPath" = $1, "updatedAt" = $2 WHERE id = $3', [photoPath, now, id]);
+  }
+  return (await getItemById(id))!;
+}
+
+export async function removeItemPhotoById(id: string, photoId: string): Promise<{ item: Item; removedPath: string } | null> {
+  const photoResult = await query(
+    'SELECT id, "photoPath", "isPrimary" FROM item_photos WHERE id = $1 AND "itemId" = $2',
+    [photoId, id]
+  );
+  if (photoResult.rows.length === 0) return null;
+
+  const row = photoResult.rows[0] as { id: string; photoPath: string; isPrimary: boolean };
+  await query('DELETE FROM item_photos WHERE id = $1 AND "itemId" = $2', [photoId, id]);
+
+  if (row.isPrimary) {
+    const nextPrimary = await query(
+      'SELECT id, "photoPath" FROM item_photos WHERE "itemId" = $1 ORDER BY "createdAt" ASC LIMIT 1',
+      [id]
+    );
+    if (nextPrimary.rows.length > 0) {
+      const nextId = (nextPrimary.rows[0] as { id: string }).id;
+      const nextPath = (nextPrimary.rows[0] as { photoPath: string }).photoPath;
+      await query('UPDATE item_photos SET "isPrimary" = FALSE WHERE "itemId" = $1', [id]);
+      await query('UPDATE item_photos SET "isPrimary" = TRUE WHERE id = $1', [nextId]);
+      await query('UPDATE items SET "photoPath" = $1, "updatedAt" = $2 WHERE id = $3', [nextPath, new Date().toISOString(), id]);
+    } else {
+      await query('UPDATE items SET "photoPath" = NULL, "updatedAt" = $1 WHERE id = $2', [new Date().toISOString(), id]);
+    }
+  }
+
+  const item = await getItemById(id);
+  if (!item) return null;
+  return { item, removedPath: row.photoPath };
+}
+
+export async function setPrimaryItemPhoto(id: string, photoId: string): Promise<Item | null> {
+  const existing = await getItemById(id);
+  if (!existing) return null;
+  const target = (existing.photos ?? []).find((p) => p.id === photoId);
+  if (!target) return null;
+  await query('UPDATE item_photos SET "isPrimary" = FALSE WHERE "itemId" = $1', [id]);
+  await query('UPDATE item_photos SET "isPrimary" = TRUE WHERE id = $1 AND "itemId" = $2', [photoId, id]);
+  await query('UPDATE items SET "photoPath" = $1, "updatedAt" = $2 WHERE id = $3', [target.photoPath, new Date().toISOString(), id]);
   return (await getItemById(id))!;
 }
 
 export async function getItemPhoto(id: string): Promise<string | undefined> {
   const item = await getItemById(id);
-  return item?.photoPath;
+  return item?.photos?.find((p) => p.isPrimary)?.photoPath ?? item?.photos?.[0]?.photoPath ?? item?.photoPath;
+}
+
+export async function getItemPhotos(id: string): Promise<ItemPhoto[]> {
+  return listItemPhotos(id);
+}
+
+export async function clearItemPhotos(id: string): Promise<string[]> {
+  const photos = await listItemPhotos(id);
+  if (photos.length > 0) {
+    await query('DELETE FROM item_photos WHERE "itemId" = $1', [id]);
+  }
+  const now = new Date().toISOString();
+  await query('UPDATE items SET "photoPath" = NULL, "updatedAt" = $1 WHERE id = $2', [now, id]);
+  return photos.map((p) => p.photoPath);
 }
 
 export async function getProjectSummary(projectId: string): Promise<Record<string, number>> {

@@ -4,6 +4,7 @@
 
 .db-page {
   padding-bottom: var(--space-8);
+  gap: var(--space-4);
 }
 
 /* --- Summary Bar --- */
@@ -1112,18 +1113,52 @@
 /* --- Mobile responsive --- */
 
 @media (max-width: 480px) {
+  .db-page {
+    gap: var(--space-3);
+  }
+
+  .pa-page-header {
+    margin-bottom: 0;
+  }
+
   .db-summary__stats {
     justify-content: space-between;
   }
 
   .db-controls {
+    display: grid;
+    grid-template-columns: 1fr;
     gap: var(--space-2);
+  }
+
+  .db-controls__sort,
+  .db-controls__filter {
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .db-controls__select {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .db-form__row {
+    align-items: stretch;
+  }
+
+  .db-form__btn {
+    padding-inline: var(--space-3);
   }
 
   .db-card {
     flex-direction: column;
     align-items: stretch;
     gap: var(--space-2);
+  }
+
+  .db-card__title-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
   }
 
   .db-card__actions {
@@ -1156,6 +1191,10 @@
   .db-controls__session {
     margin-left: 0;
     width: 100%;
-    justify-content: flex-end;
+    justify-content: stretch;
+  }
+
+  .db-controls__session .db-btn {
+    flex: 1;
   }
 }

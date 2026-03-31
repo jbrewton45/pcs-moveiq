@@ -8,21 +8,29 @@ import { useAppUpdate } from "../hooks/useAppUpdate";
 export function UpdateBanner() {
   const {
     status, isAndroid, testerSignedIn, newVersionName, releaseNotes,
-    downloadPercent, installUpdate, checkForUpdate, signIn, dismiss,
+    downloadPercent, installUpdate, checkForUpdate, signIn, dismiss, error,
   } = useAppUpdate();
   const [showNotes, setShowNotes] = useState(false);
 
   if (!isAndroid) return null;
 
   // Tester needs to sign in first (first launch only)
-  if (!testerSignedIn && status !== "signing_in" && status !== "checking" && status !== "idle") {
+  if (!testerSignedIn && status !== "dismissed" && status !== "checking") {
     return (
       <div className="update-banner update-banner--available">
         <span className="update-banner__text">Sign in to receive test builds</span>
         <div className="update-banner__actions">
-          <button className="update-banner__btn" onClick={signIn}>Sign In</button>
+          <button className="update-banner__btn" onClick={signIn} disabled={status === "signing_in"}>
+            {status === "signing_in" ? "Signing In..." : "Sign In"}
+          </button>
+          {status === "error" && (
+            <button className="update-banner__btn update-banner__btn--ghost" onClick={checkForUpdate}>
+              Retry Check
+            </button>
+          )}
           <button className="update-banner__dismiss" onClick={dismiss}>&times;</button>
         </div>
+        {status === "error" && error && <p className="update-banner__error">{error}</p>}
       </div>
     );
   }

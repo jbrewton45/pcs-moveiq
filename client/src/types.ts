@@ -94,6 +94,14 @@ export interface ClarificationQuestion {
   options?: string[];  // for select type
 }
 
+export interface ItemPhoto {
+  id: string;
+  itemId: string;
+  photoPath: string;
+  isPrimary: boolean;
+  createdAt: string;
+}
+
 export interface Item {
   id: string;
   projectId: string;
@@ -105,6 +113,7 @@ export interface Item {
   notes?: string;
   weightLbs?: number;
   photoPath?: string;
+  photos?: ItemPhoto[];
   sentimentalFlag: boolean;
   keepFlag: boolean;
   willingToSell: boolean;

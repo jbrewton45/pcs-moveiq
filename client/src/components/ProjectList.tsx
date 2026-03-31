@@ -35,11 +35,11 @@ export function ProjectList({ refreshKey, onSelect }: Props) {
   }, [refreshKey]);
 
   if (loading) return <p className="loading">Loading projects...</p>;
-  if (projects.length === 0) return <p className="empty">No projects yet. Create one above.</p>;
+  if (projects.length === 0) return <p className="empty">No projects yet. Create one to start inventory.</p>;
 
   return (
     <section className="project-list">
-      <h2>Your Move Projects</h2>
+      <h2>Your Projects</h2>
       <div className="project-grid">
         {projects.map((p) => (
           <div

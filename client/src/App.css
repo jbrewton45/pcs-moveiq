@@ -1290,6 +1290,39 @@
   align-items: center;
   gap: 0.5rem;
 }
+.item-edit-photo-actions--stacked {
+  margin-bottom: 0.6rem;
+}
+
+.item-photo-gallery {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+
+.item-photo-gallery__item {
+  border: 1px solid var(--color-border, #e0e0e0);
+  border-radius: 0.5rem;
+  padding: 0.45rem;
+  background: var(--color-bg-soft, #fafafa);
+}
+
+.item-photo-gallery__item--primary {
+  border-color: var(--signal, #dd6b20);
+}
+
+.item-photo-gallery__thumb {
+  width: 100%;
+  height: 7.5rem;
+  object-fit: cover;
+  border-radius: 0.35rem;
+}
+
+.item-photo-gallery__actions {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+}
 
 .btn-photo-replace {
   padding: 0.35rem 0.75rem;
@@ -1320,6 +1353,36 @@
   font-size: 0.7rem;
   opacity: 0.55;
   margin-top: 0.35rem;
+}
+
+.room-add-primary {
+  min-width: 7rem;
+}
+
+.add-item-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.add-item-sheet__option {
+  width: 100%;
+}
+
+.add-item-sheet__manual-link {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.2rem 0;
+  color: var(--text-secondary, #57606a);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.add-item-sheet__hint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-secondary, #57606a);
 }
 
 /* Screen-reader only (for hidden file input) */
@@ -1598,6 +1661,17 @@
 /* Comparables */
 .comp-list {
   margin-top: 0.5rem;
+}
+.comp-list__toggle {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--color-border, #e0e0e0);
+  border-radius: 0.45rem;
+  background: var(--bg-elevated, #fff);
+  color: var(--text-secondary, #57606a);
+  padding: 0.4rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 .comp-list__title {
   font-size: 0.7rem;
@@ -2347,7 +2421,13 @@
   color: #fff;
   cursor: pointer;
 }
+.update-banner__btn:disabled { opacity: 0.65; cursor: not-allowed; }
 .update-banner--error .update-banner__btn { background: var(--danger); }
+.update-banner__btn--ghost {
+  background: transparent;
+  border: 1px solid currentColor;
+  color: inherit;
+}
 
 .update-banner__dismiss {
   background: none;
@@ -2380,6 +2460,12 @@
   line-height: 1.4;
   opacity: 0.85;
 }
+.update-banner__error {
+  margin: 0;
+  width: 100%;
+  font-size: 0.66rem;
+  opacity: 0.9;
+}
 
 .update-banner__progress {
   width: 100%;
@@ -2405,6 +2491,21 @@
 
 .pa-page-header {
   margin-bottom: var(--space-4);
+}
+
+.inventory-home-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.inventory-home-actions__new-project {
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0.4rem 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .pa-page-subtitle {

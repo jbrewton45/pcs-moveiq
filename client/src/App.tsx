@@ -26,12 +26,50 @@ import "./styles/ui.css";
 
 function HomeRoute() {
   const [refreshKey, setRefreshKey] = useState(0);
+  const [projectCount, setProjectCount] = useState<number | null>(null);
+  const [showCreateProject, setShowCreateProject] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listProjects()
+      .then((projects) => {
+        if (!cancelled) setProjectCount(projects.length);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  const hasProjects = (projectCount ?? 0) > 0;
+  const canShowCreate = projectCount !== null && (!hasProjects || showCreateProject);
 
   return (
     <section className="stacked-view">
-      <ProjectForm onCreated={() => setRefreshKey((k) => k + 1)} />
       <ProjectList refreshKey={refreshKey} onSelect={(projectId) => navigate(`/projects/${projectId}`)} />
+      {hasProjects && (
+        <div className="inventory-home-actions">
+          <button
+            type="button"
+            className="inventory-home-actions__new-project"
+            onClick={() => setShowCreateProject((v) => !v)}
+          >
+            {showCreateProject ? "Hide New Project" : "New Project"}
+          </button>
+        </div>
+      )}
+      {canShowCreate && (
+        <ProjectForm
+          onCreated={() => {
+            setRefreshKey((k) => k + 1);
+            setShowCreateProject(false);
+          }}
+        />
+      )}
     </section>
   );
 }
