@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Item, ItemCondition, ItemStatus, SizeClass, Recommendation, Comparable, ComparableSource, ClarificationQuestion } from "../types";
 import { api } from "../api";
 import { VoiceCapture } from "./VoiceCapture";
+import { BottomSheet } from "./ui/BottomSheet";
+import { ConfirmSheet } from "./ui/ConfirmSheet";
 
 function label(s: string) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -479,17 +481,8 @@ function ItemEditForm({ item, onSave, onCancel, onDelete }: ItemEditFormProps) {
     }
   }
 
-  async function handleDelete() {
-    const confirmed = window.confirm(
-      `Delete "${item.itemName}"? This cannot be undone.`
-    );
-    if (!confirmed) return;
-    try {
-      await api.deleteItem(item.id);
-      onDelete();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Failed to delete item");
-    }
+  function handleDelete() {
+    onDelete();
   }
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -747,6 +740,10 @@ export function RoomDetailView({
   const [willingToSell, setWillingToSell] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [showBulkSheet, setShowBulkSheet] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState<ItemStatus>("REVIEWED");
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState<Item | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -807,6 +804,18 @@ export function RoomDetailView({
   function handleEditDelete() {
     setRefreshKey((k) => k + 1);
     setEditingItemId(null);
+    setConfirmDeleteItem(null);
+  }
+
+  async function handleConfirmedItemDelete() {
+    if (!confirmDeleteItem) return;
+    try {
+      await api.deleteItem(confirmDeleteItem.id);
+      handleEditDelete();
+    } catch {
+      // item form shows authoritative errors while editing;
+      // this path keeps state stable even if delete fails.
+    }
   }
 
   function toggleSelect(id: string) {
@@ -829,20 +838,20 @@ export function RoomDetailView({
     }
   }
 
-  async function handleBulkStatusUpdate(e: React.ChangeEvent<HTMLSelectElement>) {
-    const status = e.target.value;
-    if (!status) return;
+  async function handleBulkStatusUpdate(status: ItemStatus) {
     await api.bulkUpdateStatus(Array.from(selectedIds), status);
     setSelectedIds(new Set());
     setSelectMode(false);
+    setShowBulkSheet(false);
     setRefreshKey((k) => k + 1);
   }
 
   async function handleBulkDelete() {
-    if (!window.confirm(`Delete ${selectedIds.size} items? This cannot be undone.`)) return;
     await api.bulkDeleteItems(Array.from(selectedIds));
     setSelectedIds(new Set());
     setSelectMode(false);
+    setShowBulkSheet(false);
+    setConfirmBulkDelete(false);
     setRefreshKey((k) => k + 1);
   }
 
@@ -909,11 +918,11 @@ export function RoomDetailView({
     }
   }
 
-  const showBulkBar = selectMode && selectedIds.size > 0;
+  const editedItem = editingItemId ? items.find((i) => i.id === editingItemId) ?? null : null;
   const roomWeight = items.reduce((sum, i) => sum + (i.weightLbs ?? 0), 0);
 
   return (
-    <div className={showBulkBar ? "has-bulk-bar" : undefined}>
+    <div>
       <button className="back-btn" onClick={onBack}>
         ← Back to Project
       </button>
@@ -945,11 +954,17 @@ export function RoomDetailView({
               <button className="bulk-select-all-btn" onClick={toggleSelectAll}>
                 {selectedIds.size === items.length ? "Deselect All" : "Select All"}
               </button>
+              {selectedIds.size > 0 && (
+                <button className="bulk-select-all-btn" onClick={() => setShowBulkSheet(true)}>
+                  Actions ({selectedIds.size})
+                </button>
+              )}
               <button
                 className="bulk-cancel-btn"
                 onClick={() => {
                   setSelectMode(false);
                   setSelectedIds(new Set());
+                  setShowBulkSheet(false);
                 }}
               >
                 Cancel
@@ -1002,36 +1017,26 @@ export function RoomDetailView({
           <p className="empty">No items yet. Add one below.</p>
         ) : (
           <div className="item-list">
-            {items.map((item) =>
-              !selectMode && editingItemId === item.id ? (
-                <ItemEditForm
-                  key={item.id}
-                  item={item}
-                  onSave={handleEditSave}
-                  onCancel={() => setEditingItemId(null)}
-                  onDelete={handleEditDelete}
-                />
-              ) : (
-                <ItemReadCard
-                  key={item.id}
-                  item={item}
-                  selectMode={selectMode}
-                  selected={selectedIds.has(item.id)}
-                  onToggleSelect={toggleSelect}
-                  onEdit={setEditingItemId}
-                  onIdentify={handleIdentify}
-                  onPricing={handlePricing}
-                  onConfirm={handleConfirm}
-                  onItemUpdated={handleItemUpdated}
-                  identifying={identifying === item.id}
-                  pricing={pricing === item.id}
-                  confirming={confirming}
-                  comparables={comparables[item.id] ?? []}
-                  identifyError={identifyError === item.id}
-                  pricingError={pricingError === item.id}
-                />
-              )
-            )}
+            {items.map((item) => (
+              <ItemReadCard
+                key={item.id}
+                item={item}
+                selectMode={selectMode}
+                selected={selectedIds.has(item.id)}
+                onToggleSelect={toggleSelect}
+                onEdit={setEditingItemId}
+                onIdentify={handleIdentify}
+                onPricing={handlePricing}
+                onConfirm={handleConfirm}
+                onItemUpdated={handleItemUpdated}
+                identifying={identifying === item.id}
+                pricing={pricing === item.id}
+                confirming={confirming}
+                comparables={comparables[item.id] ?? []}
+                identifyError={identifyError === item.id}
+                pricingError={pricingError === item.id}
+              />
+            ))}
           </div>
         )}
       </section>
@@ -1202,24 +1207,62 @@ export function RoomDetailView({
         )}
       </section>
 
-      {showBulkBar && (
-        <div className="bulk-action-bar">
-          <span className="bulk-action-bar__count">{selectedIds.size} selected</span>
-          <select
-            className="bulk-action-bar__status"
-            defaultValue=""
-            onChange={handleBulkStatusUpdate}
-          >
-            <option value="" disabled>Update Status...</option>
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>{label(s)}</option>
-            ))}
-          </select>
-          <button className="bulk-action-bar__delete" onClick={handleBulkDelete}>
-            Delete
+      <BottomSheet open={editedItem !== null} onClose={() => setEditingItemId(null)} title="Edit Item">
+        {editedItem && (
+          <ItemEditForm
+            item={editedItem}
+            onSave={handleEditSave}
+            onCancel={() => setEditingItemId(null)}
+            onDelete={() => setConfirmDeleteItem(editedItem)}
+          />
+        )}
+      </BottomSheet>
+
+      <BottomSheet open={showBulkSheet} onClose={() => setShowBulkSheet(false)} title="Bulk Actions">
+        <div className="bulk-sheet__group">
+          <label>
+            Update Status
+            <select
+              className="bulk-sheet__status"
+              value={bulkStatus}
+              onChange={(e) => setBulkStatus(e.target.value as ItemStatus)}
+            >
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>{label(s)}</option>
+              ))}
+            </select>
+          </label>
+          <div className="sheet__actions">
+            <button type="button" className="sheet__btn sheet__btn--secondary" onClick={() => setShowBulkSheet(false)}>
+              Cancel
+            </button>
+            <button type="button" className="sheet__btn sheet__btn--primary" onClick={() => void handleBulkStatusUpdate(bulkStatus)}>
+              Apply Status
+            </button>
+          </div>
+          <button type="button" className="item-delete-btn" onClick={() => setConfirmBulkDelete(true)}>
+            Delete Selected Items
           </button>
         </div>
-      )}
+      </BottomSheet>
+
+      <ConfirmSheet
+        open={confirmBulkDelete}
+        title="Delete Selected Items"
+        description={`Delete ${selectedIds.size} selected items? This cannot be undone.`}
+        confirmLabel="Delete Items"
+        onCancel={() => setConfirmBulkDelete(false)}
+        onConfirm={() => void handleBulkDelete()}
+      />
+
+      <ConfirmSheet
+        open={confirmDeleteItem !== null}
+        title="Delete Item"
+        description={confirmDeleteItem ? `Delete "${confirmDeleteItem.itemName}"? This cannot be undone.` : ""}
+        confirmLabel="Delete Item"
+        onCancel={() => setConfirmDeleteItem(null)}
+        onConfirm={() => void handleConfirmedItemDelete()}
+      />
     </div>
   );
 }

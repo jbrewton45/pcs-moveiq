@@ -1,0 +1,114 @@
+.more-grid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.more-link {
+  width: 100%;
+  text-align: left;
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.48);
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.sheet {
+  width: min(44rem, 100%);
+  max-height: 86svh;
+  overflow: auto;
+  background: var(--bg-elevated);
+  border-top-left-radius: 1rem;
+  border-top-right-radius: 1rem;
+  padding: var(--space-3) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+  box-shadow: var(--shadow-float);
+}
+
+.sheet__grabber {
+  width: 3rem;
+  height: 0.25rem;
+  border-radius: 999px;
+  margin: 0 auto var(--space-3);
+  background: var(--border-strong);
+}
+
+.sheet__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.sheet__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+}
+
+.sheet__close {
+  border: 1px solid var(--border-soft);
+  background: transparent;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  font-weight: 700;
+}
+
+.sheet__content {
+  margin-top: var(--space-3);
+}
+
+.sheet__description {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.sheet__actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.sheet__btn {
+  flex: 1;
+  border-radius: 999px;
+  padding: 0.6rem 0.8rem;
+  font-weight: 700;
+  border: 1px solid var(--border-soft);
+}
+
+.sheet__btn--secondary {
+  background: transparent;
+}
+
+.sheet__btn--danger {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+.sheet__btn--primary {
+  background: var(--signal);
+  color: #fff;
+  border-color: var(--signal);
+}
+
+.bulk-sheet__group {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.bulk-sheet__status {
+  width: 100%;
+}

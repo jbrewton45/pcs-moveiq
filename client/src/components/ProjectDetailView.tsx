@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Project, Room, Item, Recommendation, MoveType, HousingAssumption, UserGoal } from "../types";
 import { api } from "../api";
+import { ConfirmSheet } from "./ui/ConfirmSheet";
 
 function formatDate(iso: string) {
   if (!iso) return "—";
@@ -370,6 +371,8 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
   const [editWeightAllowance, setEditWeightAllowance] = useState("");
   const [projectSaving, setProjectSaving] = useState(false);
   const [projectEditError, setProjectEditError] = useState("");
+  const [confirmDeleteProject, setConfirmDeleteProject] = useState(false);
+  const [roomToDelete, setRoomToDelete] = useState<Room | null>(null);
 
   useEffect(() => {
     setLoadingProject(true);
@@ -455,11 +458,11 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
     }
   }
 
-  async function handleRoomDelete(roomId: string, name: string) {
-    if (!window.confirm(`Delete room "${name}"? All items in this room will also be deleted.`)) return;
+  async function handleRoomDelete(roomId: string) {
     try {
       await api.deleteRoom(roomId);
       setEditingRoomId(null);
+      setRoomToDelete(null);
       setLocalRoomsKey((k) => k + 1);
     } catch (err) {
       setRoomEditError(err instanceof Error ? err.message : "Failed to delete room");
@@ -510,9 +513,9 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
 
   async function handleProjectDelete() {
     if (!project) return;
-    if (!window.confirm(`Delete "${project.projectName}"? All rooms and items will also be deleted.`)) return;
     try {
       await api.deleteProject(projectId);
+      setConfirmDeleteProject(false);
       onBack();
     } catch (err) {
       setProjectEditError(err instanceof Error ? err.message : "Failed to delete project");
@@ -662,7 +665,7 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
           </button>
 
           <div className="item-edit-delete-zone">
-            <button type="button" className="item-delete-btn" onClick={handleProjectDelete}>
+            <button type="button" className="item-delete-btn" onClick={() => setConfirmDeleteProject(true)}>
               Delete this project
             </button>
           </div>
@@ -867,7 +870,7 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
                             <button
                               type="button"
                               className="item-delete-btn"
-                              onClick={() => handleRoomDelete(room.id, room.roomName)}
+                              onClick={() => setRoomToDelete(room)}
                             >
                               Delete this room
                             </button>
@@ -969,6 +972,26 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
           </section>
         </>
       )}
+
+      <ConfirmSheet
+        open={confirmDeleteProject}
+        title="Delete Project"
+        description={project ? `Delete "${project.projectName}" and all associated rooms/items? This cannot be undone.` : ""}
+        confirmLabel="Delete Project"
+        onCancel={() => setConfirmDeleteProject(false)}
+        onConfirm={handleProjectDelete}
+      />
+
+      <ConfirmSheet
+        open={roomToDelete !== null}
+        title="Delete Room"
+        description={roomToDelete ? `Delete "${roomToDelete.roomName}" and all items in it? This cannot be undone.` : ""}
+        confirmLabel="Delete Room"
+        onCancel={() => setRoomToDelete(null)}
+        onConfirm={() => {
+          if (roomToDelete) void handleRoomDelete(roomToDelete.id);
+        }}
+      />
     </div>
   );
 }
