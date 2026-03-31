@@ -1,6 +1,9 @@
 import type { Project, Room, Item, Comparable, ProjectWorkspace, UserPublic, EbayAnalysisResult, SellPriorityResult } from "./types";
+import { Capacitor } from "@capacitor/core";
 
-const BASE = "/api";
+const configuredApiOrigin = (import.meta.env.VITE_API_ORIGIN as string | undefined)?.trim();
+const apiOrigin = configuredApiOrigin ? configuredApiOrigin.replace(/\/$/, "") : "https://pcs-moveiq.replit.app";
+const BASE = Capacitor.isNativePlatform() ? `${apiOrigin}/api` : "/api";
 
 let authToken: string | null = localStorage.getItem("moveiq_token");
 
