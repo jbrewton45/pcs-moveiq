@@ -16,11 +16,13 @@ import { ProjectDetailView } from "./components/ProjectDetailView";
 import { ProjectForm } from "./components/ProjectForm";
 import { ProjectList } from "./components/ProjectList";
 import { PricingAnalysis } from "./components/PricingAnalysis";
+import { MoreView } from "./components/MoreView";
 import { SellDashboard } from "./components/dashboard/SellDashboard";
 import { ProviderSettings } from "./components/ProviderSettings";
 import { RoomDetailView } from "./components/RoomDetailView";
 import "./App.css";
 import "./styles/screens.css";
+import "./styles/ui.css";
 
 function HomeRoute() {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -104,11 +106,15 @@ interface AuthedAppProps {
 
 function PricingRoute() {
   const navigate = useNavigate();
-  return <PricingAnalysis onBack={() => navigate("/")} />;
+  return <PricingAnalysis onBack={() => navigate("/more")} />;
 }
 
 function DashboardRoute() {
   return <SellDashboard />;
+}
+
+function MoreRoute() {
+  return <MoreView />;
 }
 
 function AuthedApp({ user, onLogout, onUserUpdate }: AuthedAppProps) {
@@ -122,8 +128,9 @@ function AuthedApp({ user, onLogout, onUserUpdate }: AuthedAppProps) {
         <Route path="projects/:projectId/rooms/:roomId" element={<RoomRoute />} />
         <Route path="pricing" element={<PricingRoute />} />
         <Route path="dashboard" element={<DashboardRoute />} />
-        <Route path="profile" element={<ProfileView user={user} onBack={() => navigate(-1)} onUpdate={onUserUpdate} />} />
-        <Route path="settings" element={<ProviderSettings onBack={() => navigate(-1)} />} />
+        <Route path="more" element={<MoreRoute />} />
+        <Route path="profile" element={<ProfileView user={user} onBack={() => navigate("/")} onUpdate={onUserUpdate} />} />
+        <Route path="settings" element={<ProviderSettings onBack={() => navigate("/more")} />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
