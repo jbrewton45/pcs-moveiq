@@ -114,6 +114,15 @@ function cleanReasoning(reasoning?: string): string {
   return reasoning.replace(/^\[(Mock|Fallback|OpenAI)\]\s*/, "").replace(/\s*\[Price adjusted:.*?\]/, "");
 }
 
+function isScannedItem(item: Item): boolean {
+  return (
+    item.identificationStatus !== "NONE" ||
+    item.priceFairMarket != null ||
+    !!item.pricingReasoning ||
+    !!item.pendingClarifications
+  );
+}
+
 // ---------- ConfigTierBadge ----------
 
 const CONFIG_TIER_LABELS: Record<string, { label: string; cls: string }> = {
@@ -133,7 +142,6 @@ function ConfigTierBadge({ reasoning }: { reasoning: string }) {
 }
 
 // ---------- ItemReadCard ----------
-
 interface ItemReadCardProps {
   item: Item;
   selectMode: boolean;
@@ -150,6 +158,8 @@ interface ItemReadCardProps {
   comparables: Comparable[];
   identifyError: boolean;
   pricingError: boolean;
+  collapseSignal: number;
+  expandSignal: number;
 }
 
 function ItemReadCard({
@@ -168,9 +178,46 @@ function ItemReadCard({
   comparables,
   identifyError,
   pricingError,
+  collapseSignal,
+  expandSignal,
 }: ItemReadCardProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submittingClarifications, setSubmittingClarifications] = useState(false);
+  const scannedItem = isScannedItem(item);
+  const [expanded, setExpanded] = useState(!scannedItem);
+
+  useEffect(() => {
+    setExpanded(!scannedItem);
+  }, [item.id, scannedItem]);
+
+  useEffect(() => {
+    if (collapseSignal > 0 && scannedItem) {
+      setExpanded(false);
+    }
+  }, [collapseSignal, scannedItem]);
+
+  useEffect(() => {
+    if (expandSignal > 0 && scannedItem) {
+      setExpanded(true);
+    }
+  }, [expandSignal, scannedItem]);
+
+  let clarifications: ClarificationQuestion[] = [];
+  if (item.pendingClarifications) {
+    try {
+      clarifications = JSON.parse(item.pendingClarifications) as ClarificationQuestion[];
+    } catch {
+      clarifications = [];
+    }
+  }
+
+  const hasPricing = item.priceFairMarket != null || !!item.pricingReasoning;
+  const hasAdvancedDetails =
+    scannedItem ||
+    !!item.notes ||
+    item.sentimentalFlag ||
+    item.keepFlag ||
+    comparables.length > 0;
 
   const cardClass = [
     "item-card",
@@ -211,206 +258,230 @@ function ItemReadCard({
         )}
         <div className="item-card__meta">
           <span>{item.category}</span>
-          <span>·</span>
+          <span>|</span>
           <span>{label(item.condition)}</span>
-          <span>·</span>
+          <span>|</span>
           <span>{label(item.sizeClass)}</span>
           {item.weightLbs != null && (
             <>
-              <span>·</span>
+              <span>|</span>
               <span className="item-card__meta-weight">{item.weightLbs} lbs</span>
             </>
           )}
         </div>
-        {item.notes && (
-          <div className="item-card__notes">{item.notes}</div>
-        )}
-        {(item.sentimentalFlag || item.keepFlag) && (
-          <div className="item-card__flags">
-            {item.sentimentalFlag && (
-              <span className="item-card__flag item-card__flag--sentimental">
-                Sentimental
-              </span>
-            )}
-            {item.keepFlag && (
-              <span className="item-card__flag item-card__flag--keep">
-                Keep
-              </span>
-            )}
-          </div>
-        )}
 
-        {item.identificationStatus !== "NONE" && (
-          <div className="item-card__identification">
-            <div className="id-header">
-              <span className={`id-status-badge id-status-badge--${item.identificationStatus.toLowerCase()}`}>
-                {item.identificationStatus === "SUGGESTED" ? "AI Suggested" : item.identificationStatus === "CONFIRMED" ? "Confirmed" : "Edited"}
-              </span>
-              <ConfidenceDots value={item.identificationConfidence ?? 0} />
-            </div>
-            <p className="id-details">
-              <strong>{item.identifiedName}</strong>
-              {item.identifiedBrand && <span> by {item.identifiedBrand}</span>}
-              {item.identifiedModel && <span> ({item.identifiedModel})</span>}
-            </p>
-            {item.identificationReasoning && <p className="id-reasoning">{cleanReasoning(item.identificationReasoning)}</p>}
-            <ProviderBadge reasoning={item.identificationReasoning} />
-            {item.identificationStatus === "SUGGESTED" && (
-              <div className="id-confirm-actions">
-                <button className="btn-confirm" disabled={confirming} onClick={() => onConfirm(item.id)}>
-                  {confirming ? "..." : "Confirm"}
-                </button>
-                <button className="btn-edit-id" onClick={() => onEdit(item.id)}>Edit</button>
-              </div>
-            )}
-          </div>
-        )}
+        <div className="item-card__summary-row">
+          <span className={`item-summary-chip item-summary-chip--${item.identificationStatus.toLowerCase()}`}>
+            {item.identificationStatus === "NONE" ? "Needs ID" : item.identificationStatus === "SUGGESTED" ? "Review ID" : "Identified"}
+          </span>
+          {hasPricing && (
+            <span className="item-summary-chip item-summary-chip--pricing">
+              {item.priceFairMarket != null ? `FMV $${item.priceFairMarket}` : "Pricing notes"}
+            </span>
+          )}
+          {clarifications.length > 0 && (
+            <span className="item-summary-chip item-summary-chip--clarification">
+              {clarifications.length} question{clarifications.length > 1 ? "s" : ""}
+            </span>
+          )}
+          {hasAdvancedDetails && (
+            <button
+              type="button"
+              className="item-card__toggle-btn"
+              onClick={() => setExpanded((prev) => !prev)}
+            >
+              {expanded ? "Hide Details" : "Show Details"}
+            </button>
+          )}
+        </div>
 
-        {(() => {
-          const clarifications: ClarificationQuestion[] = item.pendingClarifications
-            ? JSON.parse(item.pendingClarifications)
-            : [];
-          if (clarifications.length === 0) return null;
-          return (
-            <div className="clarification-section">
-              <h4 className="clarification-section__title">Quick Questions</h4>
-              <p className="clarification-section__subtitle">These details could significantly affect pricing</p>
-              {clarifications.map((q) => (
-                <div key={q.field} className="clarification-field">
-                  <label className="clarification-field__label">{q.question}</label>
-                  {q.inputType === "boolean" ? (
-                    <div className="clarification-field__options">
-                      <button
-                        className={`clarification-option ${answers[q.field] === "yes" ? "clarification-option--selected" : ""}`}
-                        onClick={() => setAnswers(a => ({ ...a, [q.field]: "yes" }))}
-                      >Yes</button>
-                      <button
-                        className={`clarification-option ${answers[q.field] === "no" ? "clarification-option--selected" : ""}`}
-                        onClick={() => setAnswers(a => ({ ...a, [q.field]: "no" }))}
-                      >No</button>
-                    </div>
-                  ) : q.inputType === "select" && q.options ? (
-                    <select
-                      className="clarification-field__select"
-                      value={answers[q.field] ?? ""}
-                      onChange={(e) => setAnswers(a => ({ ...a, [q.field]: e.target.value }))}
-                    >
-                      <option value="">Select...</option>
-                      {q.options.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      className="clarification-field__input"
-                      type="text"
-                      value={answers[q.field] ?? ""}
-                      onChange={(e) => setAnswers(a => ({ ...a, [q.field]: e.target.value }))}
-                      placeholder="Type your answer..."
-                    />
-                  )}
-                </div>
-              ))}
-              <button
-                className="clarification-submit"
-                disabled={submittingClarifications || Object.keys(answers).length === 0}
-                onClick={async () => {
-                  setSubmittingClarifications(true);
-                  try {
-                    const updated = await api.submitClarifications(item.id, answers);
-                    onItemUpdated?.(updated);
-                    setAnswers({});
-                    await onPricing(item.id);
-                  } catch {
-                    // show error silently
-                  } finally {
-                    setSubmittingClarifications(false);
-                  }
-                }}
-              >
-                {submittingClarifications ? "Submitting..." : "Submit & Refresh Pricing"}
-              </button>
-            </div>
-          );
-        })()}
-
-        {item.priceFairMarket != null ? (
-          <div className="item-card__pricing">
-            <div className="pricing-bands">
-              <div className="pricing-band">
-                <span className="pricing-band__value">${item.priceFastSale}</span>
-                <span className="pricing-band__label">Fast Sale</span>
-              </div>
-              <div className="pricing-band">
-                <span className="pricing-band__value">${item.priceFairMarket}</span>
-                <span className="pricing-band__label">Fair Market</span>
-              </div>
-              <div className="pricing-band">
-                <span className="pricing-band__value">${item.priceReach}</span>
-                <span className="pricing-band__label">Reach</span>
-              </div>
-            </div>
-            <div className="pricing-meta">
-              {item.pricingSuggestedChannel && <span>Best: {item.pricingSuggestedChannel}</span>}
-              {item.pricingSaleSpeedBand && (
-                <span className={`pricing-speed pricing-speed--${item.pricingSaleSpeedBand.toLowerCase()}`}>
-                  {label(item.pricingSaleSpeedBand)}
-                </span>
-              )}
-              <ConfidenceDots value={item.pricingConfidence ?? 0} />
-            </div>
-            {item.pricingReasoning && <p className="pricing-reasoning">{cleanReasoning(item.pricingReasoning)}</p>}
-            {item.pricingReasoning && /\[(Priced from|Limited comparable)/.test(item.pricingReasoning) && (
-              <p className="pricing-config-note">
-                {item.pricingReasoning.match(/\[([^\]]+)\]/)?.[1]}
-              </p>
+        {expanded && (
+          <>
+            {item.notes && (
+              <div className="item-card__notes">{item.notes}</div>
             )}
-            <ProviderBadge reasoning={item.pricingReasoning} hasEbayComparables={comparables.some(c => c.source === "ebay")} />
-            {item.pricingReasoning && /\b(base|base_plus|bundle|full.?kit)\b/i.test(item.pricingReasoning) && (
-              <ConfigTierBadge reasoning={item.pricingReasoning} />
-            )}
-          </div>
-        ) : item.pricingReasoning ? (
-          <div className="item-card__pricing item-card__pricing--no-estimate">
-            <p className="pricing-no-estimate">No trustworthy estimate available</p>
-            <p className="pricing-reasoning">{item.pricingReasoning}</p>
-          </div>
-        ) : null}
-
-        {comparables.length > 0 && (
-          <div className="comp-list">
-            <p className="comp-list__title">Comparables</p>
-            <SourceSummary comparables={comparables} />
-            {comparables.map(c => (
-              <div key={c.id} className="comp-card">
-                {c.thumbnailUrl && (
-                  <img className="comp-card__thumb" src={c.thumbnailUrl} alt="" loading="lazy" width={48} height={48} />
+            {(item.sentimentalFlag || item.keepFlag) && (
+              <div className="item-card__flags">
+                {item.sentimentalFlag && (
+                  <span className="item-card__flag item-card__flag--sentimental">
+                    Sentimental
+                  </span>
                 )}
-                <div className="comp-card__info">
-                  {c.url ? (
-                    <a className="comp-card__title comp-card__title-link" href={c.url} target="_blank" rel="noopener noreferrer">
-                      {c.title}
-                    </a>
-                  ) : (
-                    <span className="comp-card__title">{c.title}</span>
-                  )}
-                  <div className="comp-card__source-row">
-                    <span className={`comp-source-badge comp-source-badge--${c.source}`}>
-                      {SOURCE_LABEL[c.source]}
-                    </span>
+                {item.keepFlag && (
+                  <span className="item-card__flag item-card__flag--keep">
+                    Keep
+                  </span>
+                )}
+              </div>
+            )}
+
+            {item.identificationStatus !== "NONE" && (
+              <div className="item-card__identification">
+                <div className="id-header">
+                  <span className={`id-status-badge id-status-badge--${item.identificationStatus.toLowerCase()}`}>
+                    {item.identificationStatus === "SUGGESTED" ? "AI Suggested" : item.identificationStatus === "CONFIRMED" ? "Confirmed" : "Edited"}
+                  </span>
+                  <ConfidenceDots value={item.identificationConfidence ?? 0} />
+                </div>
+                <p className="id-details">
+                  <strong>{item.identifiedName}</strong>
+                  {item.identifiedBrand && <span> by {item.identifiedBrand}</span>}
+                  {item.identifiedModel && <span> ({item.identifiedModel})</span>}
+                </p>
+                {item.identificationReasoning && <p className="id-reasoning">{cleanReasoning(item.identificationReasoning)}</p>}
+                <ProviderBadge reasoning={item.identificationReasoning} />
+                {item.identificationStatus === "SUGGESTED" && (
+                  <div className="id-confirm-actions">
+                    <button className="btn-confirm" disabled={confirming} onClick={() => onConfirm(item.id)}>
+                      {confirming ? "..." : "Confirm"}
+                    </button>
+                    <button className="btn-edit-id" onClick={() => onEdit(item.id)}>Edit</button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {clarifications.length > 0 && (
+              <div className="clarification-section">
+                <h4 className="clarification-section__title">Quick Questions</h4>
+                <p className="clarification-section__subtitle">These details could significantly affect pricing</p>
+                {clarifications.map((q) => (
+                  <div key={q.field} className="clarification-field">
+                    <label className="clarification-field__label">{q.question}</label>
+                    {q.inputType === "boolean" ? (
+                      <div className="clarification-field__options">
+                        <button
+                          className={`clarification-option ${answers[q.field] === "yes" ? "clarification-option--selected" : ""}`}
+                          onClick={() => setAnswers(a => ({ ...a, [q.field]: "yes" }))}
+                        >Yes</button>
+                        <button
+                          className={`clarification-option ${answers[q.field] === "no" ? "clarification-option--selected" : ""}`}
+                          onClick={() => setAnswers(a => ({ ...a, [q.field]: "no" }))}
+                        >No</button>
+                      </div>
+                    ) : q.inputType === "select" && q.options ? (
+                      <select
+                        className="clarification-field__select"
+                        value={answers[q.field] ?? ""}
+                        onChange={(e) => setAnswers(a => ({ ...a, [q.field]: e.target.value }))}
+                      >
+                        <option value="">Select...</option>
+                        {q.options.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        className="clarification-field__input"
+                        type="text"
+                        value={answers[q.field] ?? ""}
+                        onChange={(e) => setAnswers(a => ({ ...a, [q.field]: e.target.value }))}
+                        placeholder="Type your answer..."
+                      />
+                    )}
+                  </div>
+                ))}
+                <button
+                  className="clarification-submit"
+                  disabled={submittingClarifications || Object.keys(answers).length === 0}
+                  onClick={async () => {
+                    setSubmittingClarifications(true);
+                    try {
+                      const updated = await api.submitClarifications(item.id, answers);
+                      onItemUpdated?.(updated);
+                      setAnswers({});
+                      await onPricing(item.id);
+                    } catch {
+                      // show error silently
+                    } finally {
+                      setSubmittingClarifications(false);
+                    }
+                  }}
+                >
+                  {submittingClarifications ? "Submitting..." : "Submit & Refresh Pricing"}
+                </button>
+              </div>
+            )}
+
+            {item.priceFairMarket != null ? (
+              <div className="item-card__pricing">
+                <div className="pricing-bands">
+                  <div className="pricing-band">
+                    <span className="pricing-band__value">${item.priceFastSale}</span>
+                    <span className="pricing-band__label">Fast Sale</span>
+                  </div>
+                  <div className="pricing-band">
+                    <span className="pricing-band__value">${item.priceFairMarket}</span>
+                    <span className="pricing-band__label">Fair Market</span>
+                  </div>
+                  <div className="pricing-band">
+                    <span className="pricing-band__value">${item.priceReach}</span>
+                    <span className="pricing-band__label">Reach</span>
                   </div>
                 </div>
-                <div className="comp-card__right">
-                  <span className="comp-card__price">${c.price}</span>
-                  {c.soldStatus && (
-                    <span className={`comp-card__status comp-card__status--${c.soldStatus.toLowerCase()}`}>
-                      {c.soldStatus}
+                <div className="pricing-meta">
+                  {item.pricingSuggestedChannel && <span>Best: {item.pricingSuggestedChannel}</span>}
+                  {item.pricingSaleSpeedBand && (
+                    <span className={`pricing-speed pricing-speed--${item.pricingSaleSpeedBand.toLowerCase()}`}>
+                      {label(item.pricingSaleSpeedBand)}
                     </span>
                   )}
+                  <ConfidenceDots value={item.pricingConfidence ?? 0} />
                 </div>
+                {item.pricingReasoning && <p className="pricing-reasoning">{cleanReasoning(item.pricingReasoning)}</p>}
+                {item.pricingReasoning && /\[(Priced from|Limited comparable)/.test(item.pricingReasoning) && (
+                  <p className="pricing-config-note">
+                    {item.pricingReasoning.match(/\[([^\]]+)\]/)?.[1]}
+                  </p>
+                )}
+                <ProviderBadge reasoning={item.pricingReasoning} hasEbayComparables={comparables.some(c => c.source === "ebay")} />
+                {item.pricingReasoning && /\b(base|base_plus|bundle|full.?kit)\b/i.test(item.pricingReasoning) && (
+                  <ConfigTierBadge reasoning={item.pricingReasoning} />
+                )}
               </div>
-            ))}
-          </div>
+            ) : item.pricingReasoning ? (
+              <div className="item-card__pricing item-card__pricing--no-estimate">
+                <p className="pricing-no-estimate">No trustworthy estimate available</p>
+                <p className="pricing-reasoning">{item.pricingReasoning}</p>
+              </div>
+            ) : null}
+
+            {comparables.length > 0 && (
+              <div className="comp-list">
+                <p className="comp-list__title">Comparables</p>
+                <SourceSummary comparables={comparables} />
+                {comparables.map(c => (
+                  <div key={c.id} className="comp-card">
+                    {c.thumbnailUrl && (
+                      <img className="comp-card__thumb" src={c.thumbnailUrl} alt="" loading="lazy" width={48} height={48} />
+                    )}
+                    <div className="comp-card__info">
+                      {c.url ? (
+                        <a className="comp-card__title comp-card__title-link" href={c.url} target="_blank" rel="noopener noreferrer">
+                          {c.title}
+                        </a>
+                      ) : (
+                        <span className="comp-card__title">{c.title}</span>
+                      )}
+                      <div className="comp-card__source-row">
+                        <span className={`comp-source-badge comp-source-badge--${c.source}`}>
+                          {SOURCE_LABEL[c.source]}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="comp-card__right">
+                      <span className="comp-card__price">${c.price}</span>
+                      {c.soldStatus && (
+                        <span className={`comp-card__status comp-card__status--${c.soldStatus.toLowerCase()}`}>
+                          {c.soldStatus}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {!selectMode && (
@@ -431,7 +502,6 @@ function ItemReadCard({
     </div>
   );
 }
-
 // ---------- ItemEditForm ----------
 
 interface ItemEditFormProps {
@@ -717,9 +787,11 @@ export function RoomDetailView({
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Voice capture toggle
-  const [showVoiceCapture, setShowVoiceCapture] = useState(false);
-  const [showWalkthrough, setShowWalkthrough] = useState(false);
+  // Intake flow state
+  const [showIntakeSheet, setShowIntakeSheet] = useState(false);
+  const [intakeMode, setIntakeMode] = useState<"manual" | "voice" | "walkthrough">("manual");
+  const [collapseScannedSignal, setCollapseScannedSignal] = useState(0);
+  const [expandScannedSignal, setExpandScannedSignal] = useState(0);
 
   // Batch identify/price state
   const [batchProcessing, setBatchProcessing] = useState(false);
@@ -788,6 +860,7 @@ export function RoomDetailView({
       setSentimentalFlag(false);
       setKeepFlag(false);
       setWillingToSell(false);
+      setShowIntakeSheet(false);
       setRefreshKey((k) => k + 1);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create item");
@@ -897,7 +970,7 @@ export function RoomDetailView({
 
   async function handleWalkthroughComplete(itemIds: string[]) {
     if (itemIds.length === 0) return;
-    setShowWalkthrough(false);
+    setShowIntakeSheet(false);
     setRefreshKey(k => k + 1);
 
     // Initialize batch status
@@ -920,11 +993,17 @@ export function RoomDetailView({
 
   const editedItem = editingItemId ? items.find((i) => i.id === editingItemId) ?? null : null;
   const roomWeight = items.reduce((sum, i) => sum + (i.weightLbs ?? 0), 0);
+  const scannedItemCount = items.filter(isScannedItem).length;
+
+  function openIntake(mode: "manual" | "voice" | "walkthrough") {
+    setIntakeMode(mode);
+    setShowIntakeSheet(true);
+  }
 
   return (
     <div>
       <button className="back-btn" onClick={onBack}>
-        ← Back to Project
+        Back to Project
       </button>
 
       <div className="detail-header">
@@ -937,7 +1016,42 @@ export function RoomDetailView({
 
       <section>
         <div className="section-heading-row">
-          <h3 className="section-heading">Items</h3>
+          <h3 className="section-heading">Inventory</h3>
+          <div className="section-heading-row__actions section-heading-row__actions--inventory">
+            <button className="sheet__btn sheet__btn--primary" type="button" onClick={() => openIntake("manual")}>
+              Add Item
+            </button>
+            <button className="voice-capture-btn" type="button" onClick={() => openIntake("voice")}>
+              Voice
+            </button>
+            <button className="voice-capture-btn" type="button" onClick={() => openIntake("walkthrough")}>
+              Walkthrough
+            </button>
+          </div>
+        </div>
+
+        <div className="inventory-toolbar">
+          <p className="inventory-toolbar__summary">
+            {items.length} item{items.length === 1 ? "" : "s"} | {scannedItemCount} scanned
+          </p>
+          {scannedItemCount > 0 && (
+            <div className="inventory-toolbar__actions">
+              <button
+                className="bulk-select-all-btn"
+                type="button"
+                onClick={() => setExpandScannedSignal((v) => v + 1)}
+              >
+                Expand Scanned
+              </button>
+              <button
+                className="bulk-select-all-btn"
+                type="button"
+                onClick={() => setCollapseScannedSignal((v) => v + 1)}
+              >
+                Collapse Scanned
+              </button>
+            </div>
+          )}
           {items.length > 0 && !selectMode && (
             <button
               className="bulk-select-btn"
@@ -977,7 +1091,7 @@ export function RoomDetailView({
           <div className="batch-status">
             <div className="batch-status__header">
               <h4 className="batch-status__title">
-                {batchProcessing ? "Identifying & Pricing Items..." : "Batch Processing Complete"}
+                {batchProcessing ? "Identifying and Pricing Items..." : "Batch Processing Complete"}
               </h4>
               {!batchProcessing && (
                 <button className="btn-cancel" type="button" onClick={() => setBatchResults(null)}>
@@ -991,9 +1105,9 @@ export function RoomDetailView({
                   <span className="batch-status__item-num">#{i + 1}</span>
                   <span className="batch-status__item-status">
                     {r.status === "queued" ? "Queued..." :
-                     r.status === "complete" ? "✓ Priced" :
+                     r.status === "complete" ? "Done" :
                      r.status === "no_estimate" ? "No estimate" :
-                     "✗ Error"}
+                     "Error"}
                   </span>
                 </div>
               ))}
@@ -1014,7 +1128,7 @@ export function RoomDetailView({
         {loading ? (
           <p className="loading">Loading items...</p>
         ) : items.length === 0 ? (
-          <p className="empty">No items yet. Add one below.</p>
+          <p className="empty">No items yet. Use Add Item to start this room inventory.</p>
         ) : (
           <div className="item-list">
             {items.map((item) => (
@@ -1035,178 +1149,163 @@ export function RoomDetailView({
                 comparables={comparables[item.id] ?? []}
                 identifyError={identifyError === item.id}
                 pricingError={pricingError === item.id}
+                collapseSignal={collapseScannedSignal}
+                expandSignal={expandScannedSignal}
               />
             ))}
           </div>
         )}
       </section>
 
-      <section>
-        <div className="section-heading-row">
-          <h3 className="section-heading">Add an Item</h3>
-          <div className="section-heading-row__actions">
-            <button
-              className="voice-capture-btn"
-              type="button"
-              onClick={() => { setShowVoiceCapture(false); setShowWalkthrough(true); }}
-            >
-              Walkthrough
-            </button>
-            <button
-              className="voice-capture-btn"
-              type="button"
-              onClick={() => { setShowWalkthrough(false); setShowVoiceCapture((v) => !v); }}
-            >
-              {showVoiceCapture ? "Type Instead" : "🎤 Speak"}
-            </button>
-          </div>
-        </div>
-
-        {showWalkthrough ? (
+      <BottomSheet
+        open={showIntakeSheet}
+        onClose={() => setShowIntakeSheet(false)}
+        title={intakeMode === "manual" ? "Add Item" : intakeMode === "voice" ? "Voice Capture" : "Room Walkthrough"}
+      >
+        {intakeMode === "walkthrough" ? (
           <VoiceCapture
             projectId={projectId}
             roomId={roomId}
             roomType={roomType}
             walkthrough
             onItemCreated={() => setRefreshKey((k) => k + 1)}
-            onCancel={() => setShowWalkthrough(false)}
+            onCancel={() => setShowIntakeSheet(false)}
             onWalkthroughComplete={handleWalkthroughComplete}
           />
-        ) : showVoiceCapture ? (
+        ) : intakeMode === "voice" ? (
           <VoiceCapture
             projectId={projectId}
             roomId={roomId}
             roomType={roomType}
             onItemCreated={() => {
               setRefreshKey((k) => k + 1);
-              setShowVoiceCapture(false);
+              setShowIntakeSheet(false);
             }}
-            onCancel={() => setShowVoiceCapture(false)}
+            onCancel={() => setShowIntakeSheet(false)}
           />
         ) : (
-        <form className="project-form" onSubmit={handleAddItem}>
-          {formError && <p className="form-error">{formError}</p>}
+          <form className="project-form" onSubmit={handleAddItem}>
+            {formError && <p className="form-error">{formError}</p>}
 
-          <label>
-            Item Name
-            <input
-              type="text"
-              value={itemName}
-              onChange={(e) => setItemName(e.target.value)}
-              placeholder="e.g. Sectional Sofa"
-              required
-            />
-          </label>
-
-          <label>
-            Category
-            <input
-              type="text"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder="e.g. Furniture, Electronics"
-              required
-            />
-          </label>
-
-          <label>
-            Condition
-            <select
-              value={condition}
-              onChange={(e) => setCondition(e.target.value as ItemCondition)}
-            >
-              {CONDITIONS.map((c) => (
-                <option key={c} value={c}>
-                  {label(c)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Size
-            <select
-              value={sizeClass}
-              onChange={(e) => setSizeClass(e.target.value as SizeClass)}
-            >
-              {SIZE_CLASSES.map((s) => (
-                <option key={s} value={s}>
-                  {label(s)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Est. Weight (lbs)
-            <div className="weight-input-group">
+            <label>
+              Item Name
               <input
-                className="weight-input-group__input"
-                type="number"
-                step="0.1"
-                min="0"
-                inputMode="decimal"
-                placeholder="0"
-                value={weightLbs}
-                onChange={e => setWeightLbs(e.target.value)}
+                type="text"
+                value={itemName}
+                onChange={(e) => setItemName(e.target.value)}
+                placeholder="e.g. Sectional Sofa"
+                required
               />
-              <span className="weight-input-group__suffix">lbs</span>
+            </label>
+
+            <label>
+              Category
+              <input
+                type="text"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                placeholder="e.g. Furniture, Electronics"
+                required
+              />
+            </label>
+
+            <label>
+              Condition
+              <select
+                value={condition}
+                onChange={(e) => setCondition(e.target.value as ItemCondition)}
+              >
+                {CONDITIONS.map((c) => (
+                  <option key={c} value={c}>
+                    {label(c)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Size
+              <select
+                value={sizeClass}
+                onChange={(e) => setSizeClass(e.target.value as SizeClass)}
+              >
+                {SIZE_CLASSES.map((s) => (
+                  <option key={s} value={s}>
+                    {label(s)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Est. Weight (lbs)
+              <div className="weight-input-group">
+                <input
+                  className="weight-input-group__input"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={weightLbs}
+                  onChange={e => setWeightLbs(e.target.value)}
+                />
+                <span className="weight-input-group__suffix">lbs</span>
+              </div>
+            </label>
+
+            <label>
+              Notes (optional)
+              <textarea
+                rows={2}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Any context, measurements, or reminders..."
+              />
+            </label>
+
+            <div className="checkbox-row">
+              <input
+                id="sentimentalFlag"
+                type="checkbox"
+                checked={sentimentalFlag}
+                onChange={(e) => setSentimentalFlag(e.target.checked)}
+              />
+              <label htmlFor="sentimentalFlag" style={{ marginBottom: 0 }}>
+                Sentimental
+              </label>
             </div>
-          </label>
 
-          <label>
-            Notes (optional)
-            <textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Any context, measurements, or reminders..."
-            />
-          </label>
+            <div className="checkbox-row">
+              <input
+                id="keepFlag"
+                type="checkbox"
+                checked={keepFlag}
+                onChange={(e) => setKeepFlag(e.target.checked)}
+              />
+              <label htmlFor="keepFlag" style={{ marginBottom: 0 }}>
+                Keep (not for sale/donation)
+              </label>
+            </div>
 
-          <div className="checkbox-row">
-            <input
-              id="sentimentalFlag"
-              type="checkbox"
-              checked={sentimentalFlag}
-              onChange={(e) => setSentimentalFlag(e.target.checked)}
-            />
-            <label htmlFor="sentimentalFlag" style={{ marginBottom: 0 }}>
-              Sentimental
-            </label>
-          </div>
+            <div className="checkbox-row">
+              <input
+                id="willingToSell"
+                type="checkbox"
+                checked={willingToSell}
+                onChange={(e) => setWillingToSell(e.target.checked)}
+              />
+              <label htmlFor="willingToSell" style={{ marginBottom: 0 }}>
+                Willing to Sell
+              </label>
+            </div>
 
-          <div className="checkbox-row">
-            <input
-              id="keepFlag"
-              type="checkbox"
-              checked={keepFlag}
-              onChange={(e) => setKeepFlag(e.target.checked)}
-            />
-            <label htmlFor="keepFlag" style={{ marginBottom: 0 }}>
-              Keep (not for sale/donation)
-            </label>
-          </div>
-
-          <div className="checkbox-row">
-            <input
-              id="willingToSell"
-              type="checkbox"
-              checked={willingToSell}
-              onChange={(e) => setWillingToSell(e.target.checked)}
-            />
-            <label htmlFor="willingToSell" style={{ marginBottom: 0 }}>
-              Willing to Sell
-            </label>
-          </div>
-
-          <button type="submit" disabled={submitting}>
-            {submitting ? "Adding..." : "Add Item"}
-          </button>
-        </form>
+            <button type="submit" disabled={submitting}>
+              {submitting ? "Adding..." : "Add Item"}
+            </button>
+          </form>
         )}
-      </section>
-
+      </BottomSheet>
       <BottomSheet open={editedItem !== null} onClose={() => setEditingItemId(null)} title="Edit Item">
         {editedItem && (
           <ItemEditForm

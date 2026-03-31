@@ -3184,3 +3184,102 @@
   .batch-status__item--error { background: #450a0a; color: #fca5a5; }
   .batch-status__bar { background: #374151; }
 }
+
+.section-heading-row__actions--inventory {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.inventory-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.8rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid color-mix(in oklab, var(--border-color, #d0d7de) 70%, transparent);
+  border-radius: 0.8rem;
+  background: color-mix(in oklab, var(--card-bg, #fff) 90%, var(--accent, #0969da) 10%);
+}
+
+.inventory-toolbar__summary {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text-secondary, #57606a);
+}
+
+.inventory-toolbar__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.item-card__summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.item-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in oklab, var(--border-color, #d0d7de) 80%, transparent);
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-secondary, #57606a);
+  background: color-mix(in oklab, var(--card-bg, #fff) 94%, #000 6%);
+}
+
+.item-summary-chip--suggested {
+  color: #9a6700;
+  border-color: #f59e0b;
+  background: #fff7e6;
+}
+
+.item-summary-chip--confirmed,
+.item-summary-chip--edited {
+  color: #095c3c;
+  border-color: #2da44e;
+  background: #e9f8ee;
+}
+
+.item-summary-chip--pricing {
+  color: #0b4fa8;
+  border-color: #58a6ff;
+  background: #eaf4ff;
+}
+
+.item-summary-chip--clarification {
+  color: #7f1d1d;
+  border-color: #f87171;
+  background: #fff1f2;
+}
+
+.item-card__toggle-btn {
+  margin-left: auto;
+  border: none;
+  border-radius: 999px;
+  padding: 0.26rem 0.7rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #125ea6, #0b4fa8);
+}
+
+@media (max-width: 640px) {
+  .inventory-toolbar {
+    padding: 0.65rem 0.75rem;
+  }
+
+  .item-card__toggle-btn {
+    width: 100%;
+    margin-left: 0;
+    justify-content: center;
+  }
+}
