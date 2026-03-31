@@ -145,10 +145,15 @@ public class AppUpdatePlugin extends Plugin {
     @PluginMethod()
     public void getAppInfo(PluginCall call) {
         try {
-            String versionName = getContext().getPackageManager()
-                .getPackageInfo(getContext().getPackageName(), 0).versionName;
-            long versionCode = getContext().getPackageManager()
-                .getPackageInfo(getContext().getPackageName(), 0).getLongVersionCode();
+            android.content.pm.PackageInfo pInfo = getContext().getPackageManager()
+                .getPackageInfo(getContext().getPackageName(), 0);
+            String versionName = pInfo.versionName;
+            long versionCode;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                versionCode = pInfo.getLongVersionCode();
+            } else {
+                versionCode = pInfo.versionCode;
+            }
 
             boolean signedIn = false;
             try {
