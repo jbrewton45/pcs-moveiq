@@ -2,15 +2,34 @@ import { useState } from "react";
 import { useAppUpdate } from "../hooks/useAppUpdate";
 
 /**
- * Slim update banner between topbar and content.
- * Android-only — renders nothing on web/iOS.
+ * Update banner between topbar and content. Android-only.
+ * Handles: sign-in prompt, update available, download progress, errors.
  */
 export function UpdateBanner() {
-  const { status, isAndroid, newVersionName, releaseNotes, installUpdate, checkForUpdate, dismiss } = useAppUpdate();
+  const {
+    status, isAndroid, testerSignedIn, newVersionName, releaseNotes,
+    downloadPercent, installUpdate, checkForUpdate, signIn, dismiss,
+  } = useAppUpdate();
   const [showNotes, setShowNotes] = useState(false);
 
   if (!isAndroid) return null;
-  if (status === "idle" || status === "checking" || status === "up_to_date" || status === "dismissed") return null;
+
+  // Tester needs to sign in first (first launch only)
+  if (!testerSignedIn && status !== "signing_in" && status !== "checking" && status !== "idle") {
+    return (
+      <div className="update-banner update-banner--available">
+        <span className="update-banner__text">Sign in to receive test builds</span>
+        <div className="update-banner__actions">
+          <button className="update-banner__btn" onClick={signIn}>Sign In</button>
+          <button className="update-banner__dismiss" onClick={dismiss}>&times;</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "idle" || status === "signing_in" || status === "checking" || status === "up_to_date" || status === "dismissed") {
+    return null;
+  }
 
   if (status === "available") {
     return (
@@ -21,7 +40,7 @@ export function UpdateBanner() {
           </span>
           {releaseNotes && (
             <button className="update-banner__notes-toggle" onClick={() => setShowNotes(v => !v)}>
-              {showNotes ? "Hide notes" : "What's new?"}
+              {showNotes ? "Hide" : "What's new?"}
             </button>
           )}
         </div>
@@ -31,6 +50,21 @@ export function UpdateBanner() {
         </div>
         {showNotes && releaseNotes && (
           <p className="update-banner__release-notes">{releaseNotes}</p>
+        )}
+      </div>
+    );
+  }
+
+  if (status === "downloading") {
+    return (
+      <div className="update-banner update-banner--updating">
+        <span className="update-banner__text">
+          Downloading update{downloadPercent != null ? ` (${downloadPercent}%)` : "..."}
+        </span>
+        {downloadPercent != null && (
+          <div className="update-banner__progress">
+            <div className="update-banner__progress-fill" style={{ width: `${downloadPercent}%` }} />
+          </div>
         )}
       </div>
     );

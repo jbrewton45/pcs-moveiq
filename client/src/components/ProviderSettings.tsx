@@ -264,7 +264,7 @@ function AppInfoSection() {
         <div className="provider-card__name-row">
           <span className="provider-card__name">App Info</span>
         </div>
-        <p className="provider-card__desc">Version and update status</p>
+        <p className="provider-card__desc">Version, update status, and tester sign-in</p>
       </div>
 
       <div className="provider-card__details">
@@ -280,12 +280,22 @@ function AppInfoSection() {
             {update.isAndroid ? "Android" : "Web"}
           </code>
         </div>
+        {update.isAndroid && (
+          <div className="provider-card__field">
+            <span className="provider-card__field-label">Tester Status</span>
+            <code className="provider-card__field-value">
+              {update.testerSignedIn ? "Signed in" : "Not signed in"}
+            </code>
+          </div>
+        )}
         <div className="provider-card__field">
           <span className="provider-card__field-label">Update Status</span>
           <code className="provider-card__field-value">
+            {update.status === "signing_in" && "Signing in..."}
             {update.status === "checking" && "Checking..."}
             {update.status === "available" && `Update available${update.newVersionName ? ` (v${update.newVersionName})` : ""}`}
             {update.status === "up_to_date" && "Up to date"}
+            {update.status === "downloading" && `Downloading${update.downloadPercent != null ? ` (${update.downloadPercent}%)` : "..."}`}
             {update.status === "updating" && "Installing..."}
             {update.status === "error" && (update.error ?? "Error")}
             {(update.status === "idle" || update.status === "dismissed") && (update.isAndroid ? "Not checked" : "N/A (web)")}
@@ -295,11 +305,15 @@ function AppInfoSection() {
 
       {update.isAndroid && (
         <div className="provider-card__actions">
-          <button
-            className="btn-action-sm"
-            disabled={update.status === "checking" || update.status === "updating"}
-            onClick={update.checkForUpdate}
-          >
+          {!update.testerSignedIn && (
+            <button className="btn-action-sm" onClick={update.signIn}
+              disabled={update.status === "signing_in"}>
+              {update.status === "signing_in" ? "Signing in..." : "Sign In as Tester"}
+            </button>
+          )}
+          <button className="btn-action-sm"
+            disabled={update.status === "checking" || update.status === "updating" || update.status === "downloading"}
+            onClick={update.checkForUpdate}>
             {update.status === "checking" ? "Checking..." : "Check for Update"}
           </button>
           {update.status === "available" && (
