@@ -70,7 +70,7 @@ jobs:
       # 5. Build web app and sync to Capacitor Android
       # ------------------------------------------------------------------
       - name: Build web app and sync to Android
-        run: npm run cap:build
+        run: VITE_APP_BUILD_SHA=${{ github.sha }} npm run cap:build
 
       # ------------------------------------------------------------------
       # 6. Decode release keystore from base64 secret

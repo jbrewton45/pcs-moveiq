@@ -30,7 +30,7 @@ jobs:
         run: npm ci
 
       - name: Build web app and sync to Android
-        run: npm run cap:build
+        run: VITE_APP_BUILD_SHA=${{ github.sha }} npm run cap:build
 
       - name: Build debug APK
         working-directory: client/android

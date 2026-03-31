@@ -88,6 +88,12 @@ body {
   align-items: center;
   gap: var(--space-3);
 }
+.topbar__identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+}
 
 .topbar__user {
   font-size: 0.76rem;
@@ -96,6 +102,12 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.topbar__build {
+  font-size: 0.62rem;
+  color: color-mix(in oklab, var(--text-inverse) 68%, #fff 32%);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .topbar__logout {

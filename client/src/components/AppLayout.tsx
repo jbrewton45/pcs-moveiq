@@ -33,6 +33,8 @@ function parseContext(pathname: string): { projectId?: string; roomId?: string }
 export function AppLayout({ userName, onLogout }: Props) {
   const location = useLocation();
   const [contextLabel, setContextLabel] = useState<string>("");
+  const buildSha = (import.meta.env.VITE_APP_BUILD_SHA as string | undefined)?.trim();
+  const buildStamp = buildSha ? `build ${buildSha.slice(0, 7)}` : "build local";
 
   const routeContext = useMemo(() => parseContext(location.pathname), [location.pathname]);
 
@@ -78,7 +80,10 @@ export function AppLayout({ userName, onLogout }: Props) {
           {contextLabel && <p className="topbar__context">{contextLabel}</p>}
         </div>
         <div className="topbar__meta">
-          <span className="topbar__user">{userName}</span>
+          <div className="topbar__identity">
+            <span className="topbar__user">{userName}</span>
+            <span className="topbar__build">{buildStamp}</span>
+          </div>
           <button className="topbar__logout" type="button" onClick={onLogout}>
             Log Out
           </button>
