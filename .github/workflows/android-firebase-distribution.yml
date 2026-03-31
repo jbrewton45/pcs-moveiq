@@ -26,7 +26,8 @@ name: Firebase App Distribution
 
 on:
   push:
-    branches: [deploy/replit]
+    branches: [deploy/replit, main]
+  workflow_dispatch:
 
 jobs:
   build-and-distribute:
