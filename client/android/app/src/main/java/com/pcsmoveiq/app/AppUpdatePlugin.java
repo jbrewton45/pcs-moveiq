@@ -9,7 +9,6 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import com.google.firebase.appdistribution.FirebaseAppDistribution;
-import com.google.firebase.appdistribution.AppDistributionRelease;
 
 /**
  * Capacitor plugin that bridges Firebase App Distribution update checks

@@ -66,9 +66,9 @@ dependencies {
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
 
-    // Firebase — App Distribution tester update alerts
-    implementation platform('com.google.firebase:firebase-bom:33.8.0')
-    implementation 'com.google.firebase:firebase-appdistribution'
+    // Firebase — App Distribution tester update alerts (explicit versions, not BOM-managed)
+    implementation 'com.google.firebase:firebase-appdistribution-api:16.0.0-beta14'
+    implementation 'com.google.firebase:firebase-appdistribution:16.0.0-beta14'
 }
 
 apply from: 'capacitor.build.gradle'
