@@ -78,11 +78,29 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface RoomScanData {
+  /** Width of the room bounding box in metres */
+  widthM: number;
+  /** Length (depth) of the room bounding box in metres */
+  lengthM: number;
+  /** Floor area in square metres */
+  areaSqM: number;
+  wallCount: number;
+  doorCount: number;
+  windowCount: number;
+  /** ISO timestamp when the scan was performed */
+  scannedAt: string;
+  /** Raw floor polygon (2-D points in metres) from RoomPlan */
+  floorPolygon?: Array<{ x: number; z: number }>;
+}
+
 export interface Room {
   id: string;
   projectId: string;
   roomName: string;
   roomType: string;
+  /** Scan metadata stored locally after a LiDAR scan */
+  scanData?: RoomScanData;
   createdAt: string;
   updatedAt: string;
 }

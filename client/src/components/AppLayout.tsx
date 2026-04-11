@@ -8,20 +8,6 @@ interface Props {
   onLogout: () => void;
 }
 
-function tabClass(isActive: boolean): string {
-  return isActive ? "tabbar__tab tabbar__tab--active" : "tabbar__tab";
-}
-
-function titleForPath(pathname: string): string {
-  if (pathname.startsWith("/projects/")) return "Inventory";
-  if (pathname.startsWith("/dashboard")) return "Sell Dashboard";
-  if (pathname.startsWith("/profile")) return "Profile";
-  if (pathname.startsWith("/pricing")) return "Pricing Analysis";
-  if (pathname.startsWith("/settings")) return "Provider Settings";
-  if (pathname.startsWith("/more")) return "More";
-  return "Inventory";
-}
-
 function parseContext(pathname: string): { projectId?: string; roomId?: string } {
   const roomMatch = pathname.match(/^\/projects\/([^/]+)\/rooms\/([^/]+)/);
   if (roomMatch) return { projectId: roomMatch[1], roomId: roomMatch[2] };
@@ -30,83 +16,144 @@ function parseContext(pathname: string): { projectId?: string; roomId?: string }
   return {};
 }
 
+function titleForPath(pathname: string): string {
+  if (pathname.startsWith("/projects/")) return "Inventory";
+  if (pathname.startsWith("/dashboard")) return "Dashboard";
+  if (pathname.startsWith("/valuation")) return "Valuation";
+  if (pathname.startsWith("/floorplan")) return "Floorplan";
+  if (pathname.startsWith("/profile")) return "Profile";
+  if (pathname.startsWith("/pricing")) return "Pricing";
+  if (pathname.startsWith("/settings")) return "Settings";
+  if (pathname.startsWith("/more")) return "More";
+  return "Home";
+}
+
+function IconHome() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+      <polyline points="9 22 9 12 15 12 15 22"/>
+    </svg>
+  );
+}
+
+function IconMap() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <path d="M3 9h18M9 21V9"/>
+    </svg>
+  );
+}
+
+function IconTrending() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+      <polyline points="17 6 23 6 23 12"/>
+    </svg>
+  );
+}
+
+function IconGrid() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+      <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+    </svg>
+  );
+}
+
+function IconMore() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
+    </svg>
+  );
+}
+
 export function AppLayout({ userName, onLogout }: Props) {
   const location = useLocation();
   const [contextLabel, setContextLabel] = useState<string>("");
-  const buildSha = (import.meta.env.VITE_APP_BUILD_SHA as string | undefined)?.trim();
-  const buildStamp = buildSha ? `build ${buildSha.slice(0, 7)}` : "build local";
 
   const routeContext = useMemo(() => parseContext(location.pathname), [location.pathname]);
 
   useEffect(() => {
     let cancelled = false;
-
     async function loadContext() {
       if (!routeContext.projectId) {
         if (!cancelled) setContextLabel("");
         return;
       }
-
       try {
         const project = await api.getProject(routeContext.projectId);
         if (!routeContext.roomId) {
           if (!cancelled) setContextLabel(project.projectName);
           return;
         }
-
         const rooms = await api.listRooms(routeContext.projectId);
         const room = rooms.find((r) => r.id === routeContext.roomId);
         if (!cancelled) {
-          setContextLabel(room ? `${project.projectName} / ${room.roomName}` : project.projectName);
+          setContextLabel(room ? `${project.projectName} › ${room.roomName}` : project.projectName);
         }
       } catch {
         if (!cancelled) setContextLabel("");
       }
     }
-
     void loadContext();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [routeContext.projectId, routeContext.roomId]);
 
+  const title = titleForPath(location.pathname);
+
   return (
-    <div className="mobile-app">
-      <header className="topbar">
-        <div className="topbar__brand">
-          <p className="topbar__eyebrow">Field Briefing</p>
-          <h1 className="topbar__title">{titleForPath(location.pathname)}</h1>
-          {contextLabel && <p className="topbar__context">{contextLabel}</p>}
-        </div>
-        <div className="topbar__meta">
-          <div className="topbar__identity">
-            <span className="topbar__user">{userName}</span>
-            <span className="topbar__build">{buildStamp}</span>
+    <div className="homer-app">
+      <header className="homer-topbar">
+        <div className="homer-topbar__left">
+          <div className="homer-topbar__logo">
+            <span className="homer-topbar__logo-icon">🏠</span>
+            <span className="homer-topbar__logo-text">MoveIQ</span>
           </div>
-          <button className="topbar__logout" type="button" onClick={onLogout}>
+          {contextLabel && <p className="homer-topbar__context">{contextLabel}</p>}
+        </div>
+        <div className="homer-topbar__right">
+          <span className="homer-topbar__user">{userName}</span>
+          <button className="homer-topbar__logout" type="button" onClick={onLogout}>
             Log Out
           </button>
         </div>
       </header>
 
       <UpdateBanner />
-      <main className="mobile-app__content">
+
+      <div className="homer-page-title">
+        <h1>{title}</h1>
+      </div>
+
+      <main className="homer-main">
         <Outlet />
       </main>
 
-      <nav className="tabbar" aria-label="Primary">
-        <NavLink to="/" end className={({ isActive }) => tabClass(isActive)}>
-          Inventory
+      <nav className="homer-tabbar" aria-label="Primary navigation">
+        <NavLink to="/" end className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
+          <IconHome />
+          <span>Home</span>
         </NavLink>
-        <NavLink to="/dashboard" className={({ isActive }) => tabClass(isActive)}>
-          Dashboard
+        <NavLink to="/floorplan" className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
+          <IconMap />
+          <span>Floorplan</span>
         </NavLink>
-        <NavLink to="/profile" className={({ isActive }) => tabClass(isActive)}>
-          Profile
+        <NavLink to="/valuation" className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
+          <IconTrending />
+          <span>Valuation</span>
         </NavLink>
-        <NavLink to="/more" className={({ isActive }) => tabClass(isActive)}>
-          More
+        <NavLink to="/dashboard" className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
+          <IconGrid />
+          <span>Dashboard</span>
+        </NavLink>
+        <NavLink to="/more" className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
+          <IconMore />
+          <span>More</span>
         </NavLink>
       </nav>
     </div>

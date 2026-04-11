@@ -1,3 +1,546 @@
+/* ============================================================
+   HOMER-INSPIRED LAYOUT
+   ============================================================ */
+
+.homer-app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+  background: var(--bg-canvas);
+  position: relative;
+}
+
+/* Top bar */
+.homer-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(12px);
+}
+
+.homer-topbar__left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.homer-topbar__logo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.homer-topbar__logo-icon {
+  font-size: 18px;
+}
+
+.homer-topbar__logo-text {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+.homer-topbar__context {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.homer-topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.homer-topbar__user {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.homer-topbar__logout {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.homer-topbar__logout:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+/* Page title strip */
+.homer-page-title {
+  padding: 16px 16px 0;
+}
+.homer-page-title h1 {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+  margin: 0;
+}
+
+/* Main content */
+.homer-main {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+}
+
+/* Bottom tab bar */
+.homer-tabbar {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-soft);
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 50;
+  backdrop-filter: blur(12px);
+}
+
+.homer-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 4px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transition: color 0.15s;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.homer-tab--active {
+  color: var(--accent-light);
+}
+
+.homer-tab svg {
+  transition: transform 0.15s;
+}
+.homer-tab--active svg {
+  transform: scale(1.1);
+}
+
+/* ============================================================
+   HOMER-INSPIRED CARDS & COMPONENTS
+   ============================================================ */
+
+.homer-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.homer-card--interactive {
+  cursor: pointer;
+}
+.homer-card--interactive:hover {
+  background: var(--bg-card-hover);
+  box-shadow: var(--shadow-float);
+}
+
+.homer-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-3);
+}
+
+/* Feature grid cards (like Homer's feature cards) */
+.homer-feature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.homer-feature-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.homer-feature-card__icon {
+  width: 36px;
+  height: 36px;
+  background: var(--accent-bg);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-light);
+  margin-bottom: var(--space-2);
+}
+
+.homer-feature-card__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 4px;
+}
+
+.homer-feature-card__desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* Hero value display (like Homer's "$4,760" ) */
+.homer-value-hero {
+  text-align: center;
+  padding: var(--space-6) var(--space-4);
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+}
+
+.homer-value-hero__label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.homer-value-hero__amount {
+  font-size: 48px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -2px;
+  line-height: 1;
+}
+
+.homer-value-hero__currency {
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  vertical-align: super;
+  letter-spacing: 0;
+}
+
+.homer-value-hero__sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: var(--space-2);
+}
+
+/* Item value rows */
+.homer-value-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.homer-value-row:last-child { border-bottom: none; }
+
+.homer-value-row__left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.homer-value-row__icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.homer-value-row__name {
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.homer-value-row__sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 1px;
+}
+
+.homer-value-row__amount {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Room floor plan card */
+.homer-room-tile {
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.homer-room-tile:hover {
+  background: var(--bg-card-hover);
+}
+
+.homer-room-tile__icon {
+  width: 42px;
+  height: 42px;
+  background: var(--accent-bg);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-light);
+  flex-shrink: 0;
+  font-size: 20px;
+}
+
+.homer-room-tile__info { flex: 1; }
+
+.homer-room-tile__name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 2px;
+}
+
+.homer-room-tile__meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.homer-room-tile__arrow {
+  color: var(--text-muted);
+  font-size: 18px;
+}
+
+/* CTA scan button (like Homer's "Add items using your camera") */
+.homer-scan-cta {
+  background: linear-gradient(135deg, var(--bg-elevated), var(--bg-card));
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.homer-scan-cta__icon {
+  width: 56px;
+  height: 56px;
+  background: var(--accent-bg);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-light);
+  font-size: 28px;
+}
+
+.homer-scan-cta__title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.homer-scan-cta__desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 220px;
+  margin: 0 auto;
+}
+
+.homer-btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 10px 24px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.homer-btn-primary:hover {
+  background: var(--accent-light);
+  transform: translateY(-1px);
+}
+
+.homer-btn-secondary {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.homer-btn-secondary:hover {
+  background: var(--bg-card);
+}
+
+/* Inventory home actions */
+.inventory-home-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-4) var(--space-4) 0;
+}
+.inventory-home-actions__new-project {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 18px;
+  cursor: pointer;
+}
+
+/* ============================================================
+   HOMER PROJECT CARDS
+   ============================================================ */
+
+.homer-project-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.homer-project-card:hover {
+  background: var(--bg-card-hover);
+  box-shadow: var(--shadow-float);
+  transform: translateY(-1px);
+}
+
+.homer-project-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.homer-project-card__icon {
+  width: 42px;
+  height: 42px;
+  background: var(--accent-bg);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.homer-project-card__name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.homer-project-card__route {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.homer-project-card__stats {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.homer-project-card__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.homer-project-card__stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.homer-project-card__stat-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.homer-project-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.homer-project-card__date {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.homer-project-card__cta {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-light);
+}
+
+/* ============================================================
+   EXISTING App Shell (legacy, kept for compatibility)
+   ============================================================ */
+
 /* App Shell */
 .app-shell {
   max-width: 48rem;

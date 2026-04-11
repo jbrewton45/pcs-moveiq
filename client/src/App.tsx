@@ -20,6 +20,8 @@ import { MoreView } from "./components/MoreView";
 import { SellDashboard } from "./components/dashboard/SellDashboard";
 import { ProviderSettings } from "./components/ProviderSettings";
 import { RoomDetailView } from "./components/RoomDetailView";
+import { ValuationView } from "./components/ValuationView";
+import { FloorplanView } from "./components/FloorplanView";
 import "./App.css";
 import "./styles/screens.css";
 import "./styles/ui.css";
@@ -58,17 +60,19 @@ function HomeRoute() {
             className="inventory-home-actions__new-project"
             onClick={() => setShowCreateProject((v) => !v)}
           >
-            {showCreateProject ? "Hide New Project" : "New Project"}
+            {showCreateProject ? "Hide Form" : "+ New Project"}
           </button>
         </div>
       )}
       {canShowCreate && (
-        <ProjectForm
-          onCreated={() => {
-            setRefreshKey((k) => k + 1);
-            setShowCreateProject(false);
-          }}
-        />
+        <div style={{ padding: "0 16px 16px" }}>
+          <ProjectForm
+            onCreated={() => {
+              setRefreshKey((k) => k + 1);
+              setShowCreateProject(false);
+            }}
+          />
+        </div>
       )}
     </section>
   );
@@ -166,6 +170,8 @@ function AuthedApp({ user, onLogout, onUserUpdate }: AuthedAppProps) {
         <Route path="projects/:projectId/rooms/:roomId" element={<RoomRoute />} />
         <Route path="pricing" element={<PricingRoute />} />
         <Route path="dashboard" element={<DashboardRoute />} />
+        <Route path="valuation" element={<ValuationView />} />
+        <Route path="floorplan" element={<FloorplanView />} />
         <Route path="more" element={<MoreRoute />} />
         <Route path="profile" element={<ProfileView user={user} onBack={() => navigate("/")} onUpdate={onUserUpdate} />} />
         <Route path="settings" element={<ProviderSettings onBack={() => navigate("/more")} />} />
