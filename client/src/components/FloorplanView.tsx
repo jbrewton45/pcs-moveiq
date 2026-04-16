@@ -4,7 +4,7 @@ import { Capacitor } from "@capacitor/core";
 import type { Project, Room, RoomScanData } from "../types";
 import { api } from "../api";
 import { RoomScanPlugin, sqMToSqFt, mToFtIn } from "../plugins/RoomScanPlugin";
-import { saveScan, getScan, clearScan } from "../plugins/scanStore";
+import { saveScan, getScan } from "../plugins/scanStore";
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Constants & helpers
@@ -313,38 +313,74 @@ export function FloorplanView() {
 
   // Launch LiDAR scan
   const handleScan = useCallback(async (room: RoomWithScan) => {
-    if (!lidarSupported) {
-      setScanError("LiDAR scanning requires an iPhone 12 Pro or later with the iOS app installed.");
+    setScanError(null);
+
+    // 🔥 Always check native support at runtime (DO NOT trust cached state)
+    try {
+      const support = await RoomScanPlugin.checkSupport();
+
+      console.log("[Floorplan] Native LiDAR support:", support);
+
+      if (!support.supported) {
+        setScanError("LiDAR scanning is not supported on this device.");
+        return;
+      }
+    } catch (err) {
+      console.error("[Floorplan] checkSupport failed:", err);
+      setScanError("Failed to verify LiDAR support.");
       return;
     }
-    setScanError(null);
+
     setScanningRoom(room);
+
     try {
-      const result = await RoomScanPlugin.startScan();
-      const scanData: RoomScanData = {
-        widthM:      result.widthM,
-        lengthM:     result.lengthM,
-        areaSqM:     result.areaSqM,
-        wallCount:   result.wallCount,
-        doorCount:   result.doorCount,
-        windowCount: result.windowCount,
-        scannedAt:   new Date().toISOString(),
-        floorPolygon: result.floorPolygon,
-      };
-      // Persist locally
-      saveScan(room.id, scanData);
-      // Update state
-      setRooms(prev => prev.map(r => r.id === room.id ? { ...r, scanData } : r));
-      setScanSuccess(`${room.roomName} scanned — ${sqMToSqFt(scanData.areaSqM).toLocaleString()} sq ft`);
+      const scanData: RoomScanData = await RoomScanPlugin.startScan();
+
+      const payloadBytes = JSON.stringify(scanData).length;
+      console.log(
+        `[Floorplan] Scan payload ready — ${payloadBytes} bytes, walls=${scanData.wallCount}, openings=${scanData.openings?.length ?? 0}, objects=${scanData.objects?.length ?? 0}`
+      );
+
+      // Persist to server (source of truth). Fall back to localStorage if the
+      // write fails so the scan isn't lost — the next scan or GET refill will
+      // reconcile.
+      try {
+        const persisted = await api.putRoomScan(room.id, scanData);
+        console.log(
+          `[Floorplan] PUT /rooms/${room.id}/scan 200 — id=${persisted.id} areaSqFt=${persisted.areaSqFt}`
+        );
+      } catch (persistErr) {
+        console.warn(
+          "[Floorplan] PUT scan failed, falling back to localStorage:",
+          persistErr
+        );
+        saveScan(room.id, scanData);
+      }
+
+      setRooms(prev =>
+        prev.map(r => r.id === room.id ? { ...r, scanData } : r)
+      );
+
+      setScanSuccess(
+        `${room.roomName} scanned — ${sqMToSqFt(scanData.areaSqM).toLocaleString()} sq ft`
+      );
+
       setTimeout(() => setScanSuccess(null), 4000);
+
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Scan failed";
-      if (!msg.includes("cancelled")) setScanError(msg);
+
+      console.error("[Floorplan] scan error:", msg);
+
+      if (!msg.includes("cancelled")) {
+        setScanError(msg);
+      }
     } finally {
       setScanningRoom(null);
     }
-  }, [lidarSupported]);
+  }, []);
 
+  // Cancel an in-flight native scan
   const handleCancelScan = useCallback(() => {
     RoomScanPlugin.stopScan().catch(() => {});
     setScanningRoom(null);
@@ -437,8 +473,8 @@ export function FloorplanView() {
             </p>
             <p style={{ color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.5, margin: 0 }}>
               {isNative
-                ? "LiDAR room scanning requires an iPhone 12 Pro, 13 Pro, 14 Pro, 15 Pro, or iPad Pro with LiDAR."
-                : "Open the PCS MoveIQ iOS app on an iPhone 12 Pro or later to use LiDAR room scanning."}
+                ? "LiDAR room scanning requires an iPhone Pro or iPad Pro model equipped with a LiDAR sensor."
+                : "Open the PCS MoveIQ iOS app on a LiDAR-equipped iPhone Pro or iPad Pro to use room scanning."}
             </p>
           </div>
         )}

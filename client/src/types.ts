@@ -48,7 +48,8 @@ export type Recommendation =
   | "STORE"
   | "DONATE"
   | "DISCARD"
-  | "KEEP";
+  | "KEEP"
+  | "COMPLETE"; // Phase 10: terminal state after an item is sold
 
 export type ItemStatus =
   | "UNREVIEWED"
@@ -78,20 +79,89 @@ export interface Project {
   updatedAt: string;
 }
 
-export interface RoomScanData {
-  /** Width of the room bounding box in metres */
+// ── Room visualization types (aligned with server RoomScanPayloadSchema) ─────
+
+/** Pose in room-local space; all metres; rotationY is yaw in radians. */
+export interface RoomTransform {
+  x: number;
+  y: number;
+  z: number;
+  rotationY: number;
+}
+
+export interface FloorPoint {
+  x: number;
+  z: number;
+}
+
+export type ScanConfidence = 0 | 1 | 2;
+
+export interface ScannedWall {
+  index: number;
+  transform: RoomTransform;
   widthM: number;
-  /** Length (depth) of the room bounding box in metres */
+  heightM: number;
+  confidence: ScanConfidence;
+}
+
+export interface ScannedOpening {
+  type: "door" | "window";
+  /** Wall index this opening belongs to, or null if no wall matched. */
+  wallIndex: number | null;
+  transform: RoomTransform;
+  /** Always present even when wallIndex is null, so the renderer can draw it. */
+  absolutePosition: { x: number; z: number };
+  widthM: number;
+  heightM: number;
+  confidence: ScanConfidence;
+}
+
+export interface ScannedObject {
+  /** Stable id from RoomPlan (UUID). */
+  objectId: string;
+  /** RoomPlan category label e.g. "sofa", "bed", "television". */
+  label: string;
+  transform: RoomTransform;
+  widthM: number;
+  heightM: number;
+  depthM: number;
+  confidence: ScanConfidence;
+}
+
+export type RoomScanAreaSource = "shoelace" | "bbox";
+
+/**
+ * Full scan payload emitted by the native plugin and sent to the server.
+ * Kept as `RoomScanData` for backward compatibility with existing callers.
+ */
+export interface RoomScanData {
+  schemaVersion: number;
+  widthM: number;
   lengthM: number;
-  /** Floor area in square metres */
+  heightM: number;
   areaSqM: number;
+  areaSource: RoomScanAreaSource;
   wallCount: number;
   doorCount: number;
   windowCount: number;
-  /** ISO timestamp when the scan was performed */
+  polygonClosed: boolean;
+  hasCurvedWalls: boolean;
+  floorPolygon: FloorPoint[];
+  walls: ScannedWall[];
+  openings: ScannedOpening[];
+  objects: ScannedObject[];
+  /** Phase 15: absolute on-device path to a USDZ file (iOS native only). */
+  usdzPath?: string;
   scannedAt: string;
-  /** Raw floor polygon (2-D points in metres) from RoomPlan */
-  floorPolygon?: Array<{ x: number; z: number }>;
+}
+
+/** Server-returned RoomScan (= payload + server metadata). */
+export interface RoomScan extends RoomScanData {
+  id: string;
+  roomId: string;
+  areaSqFt: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Room {
@@ -99,7 +169,7 @@ export interface Room {
   projectId: string;
   roomName: string;
   roomType: string;
-  /** Scan metadata stored locally after a LiDAR scan */
+  /** Populated in the frontend after GET /rooms/:id/scan or a successful scan. */
   scanData?: RoomScanData;
   createdAt: string;
   updatedAt: string;
@@ -155,8 +225,71 @@ export interface Item {
   pricingLastUpdatedAt?: string;
   pendingClarifications?: string; // JSON-serialized ClarificationQuestion[]
   clarificationAnswers?: string;  // JSON-serialized Record<string, string>
+  // Room placement (nullable; set by tag-to-room flow)
+  roomObjectId?: string;
+  roomPositionX?: number;
+  roomPositionZ?: number;
+  rotationY?: number;
+  // Phase 10: URL the user posted this item at (FB Marketplace etc.)
+  listingUrl?: string;
+  // Phase 11: realized sell price in USD (set when item marked sold)
+  soldPriceUsd?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ItemPlacementInput {
+  roomObjectId?: string | null;
+  roomPositionX?: number | null;
+  roomPositionZ?: number | null;
+  rotationY?: number | null;
+}
+
+export interface OrphanedItem {
+  itemId: string;
+  itemName: string;
+  /** The roomObjectId stored on the item but missing from the current scan. */
+  previousObjectId: string;
+}
+
+export type DecisionBucket = "sell" | "keep" | "ship" | "donate";
+export type ItemDecisionAction = DecisionBucket | "sold";
+
+/** Raw pre-multiplier band contributions from the decision service. */
+export interface ScoreBreakdown {
+  value: number;
+  size: number;
+  urgency: number;
+  condition: number;
+  sellBonus: number;
+}
+
+export type CalibrationConfidence = "low" | "medium" | "high";
+
+/** Phase 14: one row per category with enough historical sales to calibrate. */
+export interface CategoryCalibration {
+  category: string;
+  multiplier: number;
+  sampleSize: number;
+  variance: number;
+  confidence: CalibrationConfidence;
+}
+
+export interface PrioritizedItem {
+  itemId: string;
+  score: number;
+  recommendation: DecisionBucket;
+  reason: string;
+  breakdown: ScoreBreakdown;
+  /** Phase 12–13: present when the category had ≥3 prior sales in this project
+   *  so the value band was calibrated against actual outcomes. */
+  calibration?: {
+    category: string;
+    multiplier: number;          // 0.5–1.5
+    sampleSize: number;
+    variance: number;            // population variance of ratios
+    confidence: CalibrationConfidence;
+  };
 }
 
 export interface EbayAnalysisResult {

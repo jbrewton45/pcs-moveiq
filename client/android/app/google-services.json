@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "61656887409",
+    "project_id": "pcs-moveiq-android",
+    "storage_bucket": "pcs-moveiq-android.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:61656887409:android:67348582858e81ff97ebd0",
+        "android_client_info": {
+          "package_name": "com.pcsmoveiq.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDU6hM1UZqjgYcyOaA0ICnU0zDCts_jyXg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

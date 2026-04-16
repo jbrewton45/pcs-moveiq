@@ -10,3 +10,5 @@ dist/
 *.db-wal
 uploads/
 .DS_Store
+._*
+*.swp

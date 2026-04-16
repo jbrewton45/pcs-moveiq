@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { query } from "../data/database.js";
+import { query, withTransaction } from "../data/database.js";
 import type { Item, ItemCondition, ItemPhoto, ItemStatus, RecommendationResult, PricingContext, SizeClass } from "../types/domain.js";
 import type { MoveType, HousingAssumption } from "../types/domain.js";
 import { createId } from "../utils/id.js";
@@ -158,6 +158,263 @@ export async function createItem(input: CreateItemInput): Promise<Item> {
   );
 
   return (await getItemById(id))!;
+}
+
+/**
+ * Apply a user-chosen action (sell/keep/ship/donate) to an item. Updates:
+ *   - recommendation (authoritative user choice, overrides the AI guess)
+ *   - status (workflow state: LISTED / KEPT / REVIEWED / DONATED)
+ *   - keepFlag (true only for "keep" so scoring reflects the choice)
+ *   - updatedAt
+ * Does NOT touch pricing, placement, identification, or photos.
+ */
+export type ItemDecisionAction = "sell" | "keep" | "ship" | "donate" | "sold";
+
+export async function applyItemAction(
+  id: string,
+  action: ItemDecisionAction,
+  opts: { soldPriceUsd?: number | null } = {}
+): Promise<Item | null> {
+  const existingResult = await query('SELECT id FROM items WHERE id = $1', [id]);
+  if (existingResult.rows.length === 0) return null;
+
+  const map: Record<ItemDecisionAction, { recommendation: string; status: string; keepFlag: boolean }> = {
+    sell:   { recommendation: "SELL_NOW", status: "LISTED",   keepFlag: false },
+    keep:   { recommendation: "KEEP",     status: "KEPT",     keepFlag: true  },
+    ship:   { recommendation: "SHIP",     status: "REVIEWED", keepFlag: false },
+    donate: { recommendation: "DONATE",   status: "DONATED",  keepFlag: false },
+    sold:   { recommendation: "COMPLETE", status: "SOLD",     keepFlag: false },
+  };
+  const next = map[action];
+  const now = new Date().toISOString();
+
+  // Write the core decision fields + (when action="sold" and caller supplied a
+  // value) the realized sell price in the same statement so state stays
+  // consistent. When action !== "sold" the soldPriceUsd param is ignored so
+  // we leave the existing value untouched.
+  if (action === "sold" && opts.soldPriceUsd !== undefined) {
+    await query(
+      `UPDATE items
+          SET recommendation = $1,
+              status = $2,
+              "keepFlag" = $3,
+              "soldPriceUsd" = $4,
+              "updatedAt" = $5
+        WHERE id = $6`,
+      [next.recommendation, next.status, next.keepFlag, opts.soldPriceUsd, now, id]
+    );
+  } else {
+    await query(
+      `UPDATE items
+          SET recommendation = $1,
+              status = $2,
+              "keepFlag" = $3,
+              "updatedAt" = $4
+        WHERE id = $5`,
+      [next.recommendation, next.status, next.keepFlag, now, id]
+    );
+  }
+
+  const updated = await query('SELECT * FROM items WHERE id = $1', [id]);
+  return updated.rows.length > 0
+    ? await hydrateItemPhotos(rowToItem(updated.rows[0] as Record<string, unknown>))
+    : null;
+}
+
+/**
+ * Set (or clear with `null`) the realized sell price for an item. Pure metadata:
+ * does not change recommendation, status, or keepFlag. Typically used after
+ * an item has already been marked sold, to capture/correct the final price.
+ */
+export async function updateItemSoldPrice(
+  id: string,
+  soldPriceUsd: number | null
+): Promise<Item | null> {
+  const existingResult = await query('SELECT id FROM items WHERE id = $1', [id]);
+  if (existingResult.rows.length === 0) return null;
+
+  const now = new Date().toISOString();
+  await query(
+    'UPDATE items SET "soldPriceUsd" = $1, "updatedAt" = $2 WHERE id = $3',
+    [soldPriceUsd, now, id]
+  );
+
+  const row = await query('SELECT * FROM items WHERE id = $1', [id]);
+  return row.rows.length > 0
+    ? await hydrateItemPhotos(rowToItem(row.rows[0] as Record<string, unknown>))
+    : null;
+}
+
+const ACTION_MAP: Record<ItemDecisionAction, { recommendation: string; status: string; keepFlag: boolean }> = {
+  sell:   { recommendation: "SELL_NOW", status: "LISTED",   keepFlag: false },
+  keep:   { recommendation: "KEEP",     status: "KEPT",     keepFlag: true  },
+  ship:   { recommendation: "SHIP",     status: "REVIEWED", keepFlag: false },
+  donate: { recommendation: "DONATE",   status: "DONATED",  keepFlag: false },
+  sold:   { recommendation: "COMPLETE", status: "SOLD",     keepFlag: false },
+};
+
+/**
+ * Save (or clear, with `null`) the URL the user posted this item at —
+ * e.g. the Facebook Marketplace / OfferUp / Craigslist listing link. Pure
+ * metadata; does not change recommendation or status.
+ */
+export async function updateItemListing(
+  id: string,
+  listingUrl: string | null
+): Promise<Item | null> {
+  const existingResult = await query('SELECT id FROM items WHERE id = $1', [id]);
+  if (existingResult.rows.length === 0) return null;
+
+  const now = new Date().toISOString();
+  await query(
+    'UPDATE items SET "listingUrl" = $1, "updatedAt" = $2 WHERE id = $3',
+    [listingUrl, now, id]
+  );
+
+  const row = await query('SELECT * FROM items WHERE id = $1', [id]);
+  return row.rows.length > 0
+    ? await hydrateItemPhotos(rowToItem(row.rows[0] as Record<string, unknown>))
+    : null;
+}
+
+/**
+ * Apply the same action to many items inside ONE database transaction — either
+ * all succeed or none do. Silently skips ids that no longer exist. Returns the
+ * fully-hydrated items (with photos) for the ids that were actually updated.
+ */
+export async function applyBulkItemAction(
+  itemIds: string[],
+  action: ItemDecisionAction
+): Promise<Item[]> {
+  if (itemIds.length === 0) return [];
+  const next = ACTION_MAP[action];
+  const now = new Date().toISOString();
+
+  const updatedIds: string[] = [];
+  await withTransaction(async (client) => {
+    for (const id of itemIds) {
+      const res = await client.query(
+        `UPDATE items
+            SET recommendation = $1,
+                status = $2,
+                "keepFlag" = $3,
+                "updatedAt" = $4
+          WHERE id = $5`,
+        [next.recommendation, next.status, next.keepFlag, now, id]
+      );
+      if ((res.rowCount ?? 0) > 0) updatedIds.push(id);
+    }
+  });
+
+  // Re-hydrate outside the transaction so photo-hydration does one read per row
+  // without holding the transactional connection open.
+  const hydrated: Item[] = [];
+  for (const id of updatedIds) {
+    const row = await query('SELECT * FROM items WHERE id = $1', [id]);
+    if (row.rows.length > 0) {
+      hydrated.push(await hydrateItemPhotos(rowToItem(row.rows[0] as Record<string, unknown>)));
+    }
+  }
+  return hydrated;
+}
+
+/** Update an item's room placement. All fields are optional and nullable — pass
+ *  `null` explicitly to clear a field, or omit to leave it unchanged. Setting
+ *  roomObjectId clears roomPositionX/Z in the write (and vice versa) so state
+ *  stays consistent. Throws PlacementValidationError for unusable inputs. */
+export interface UpdateItemPlacementInput {
+  roomObjectId?: string | null;
+  roomPositionX?: number | null;
+  roomPositionZ?: number | null;
+  rotationY?: number | null;
+}
+
+/** Signals a client-caused placement problem; the controller maps this to 400. */
+export class PlacementValidationError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = "PlacementValidationError";
+  }
+}
+
+export async function updateItemPlacement(
+  id: string,
+  input: UpdateItemPlacementInput
+): Promise<Item | null> {
+  const existingResult = await query('SELECT * FROM items WHERE id = $1', [id]);
+  if (existingResult.rows.length === 0) return null;
+  const existing = rowToItem(existingResult.rows[0] as Record<string, unknown>);
+
+  // Merge: "key in input" means caller is explicitly setting (incl. to null);
+  // missing key means "leave as existing".
+  let finalObjectId: string | null | undefined = "roomObjectId" in input
+    ? input.roomObjectId
+    : existing.roomObjectId;
+  let finalX: number | null | undefined = "roomPositionX" in input
+    ? input.roomPositionX
+    : existing.roomPositionX;
+  let finalZ: number | null | undefined = "roomPositionZ" in input
+    ? input.roomPositionZ
+    : existing.roomPositionZ;
+  let finalRotY: number | null | undefined = "rotationY" in input
+    ? input.rotationY
+    : existing.rotationY;
+
+  // Mutual exclusion: when the caller sets objectId, wipe XY (and vice versa).
+  if (typeof input.roomObjectId === "string") {
+    finalX = null;
+    finalZ = null;
+    finalRotY = null;
+  } else if (typeof input.roomPositionX === "number" || typeof input.roomPositionZ === "number") {
+    finalObjectId = null;
+  }
+
+  // If the caller is setting a new roomObjectId, verify it exists in the room's
+  // current scan. We look up via JOIN to items.roomId → room_scans.roomId so we
+  // don't have to fetch the scan separately.
+  if (typeof input.roomObjectId === "string") {
+    const scanResult = await query(
+      `SELECT rs.objects
+         FROM room_scans rs
+         JOIN items it ON it."roomId" = rs."roomId"
+        WHERE it.id = $1
+        LIMIT 1`,
+      [id]
+    );
+    if (scanResult.rows.length === 0) {
+      throw new PlacementValidationError(400, "Cannot tag an object: no scan exists for this room yet");
+    }
+    const raw = (scanResult.rows[0] as { objects: unknown }).objects;
+    const objects: Array<{ objectId?: string }> = Array.isArray(raw)
+      ? (raw as Array<{ objectId?: string }>)
+      : typeof raw === "string"
+        ? (JSON.parse(raw) as Array<{ objectId?: string }>)
+        : [];
+    const found = objects.some((o) => o && o.objectId === input.roomObjectId);
+    if (!found) {
+      throw new PlacementValidationError(
+        400,
+        `roomObjectId "${input.roomObjectId}" is not present in the current scan — rescan or pick a different object`
+      );
+    }
+  }
+
+  const now = new Date().toISOString();
+  await query(
+    `UPDATE items
+        SET "roomObjectId" = $1,
+            "roomPositionX" = $2,
+            "roomPositionZ" = $3,
+            "rotationY" = $4,
+            "updatedAt" = $5
+      WHERE id = $6`,
+    [finalObjectId ?? null, finalX ?? null, finalZ ?? null, finalRotY ?? null, now, id]
+  );
+
+  const updated = await query('SELECT * FROM items WHERE id = $1', [id]);
+  return updated.rows.length > 0
+    ? await hydrateItemPhotos(rowToItem(updated.rows[0] as Record<string, unknown>))
+    : null;
 }
 
 export async function updateItem(id: string, input: UpdateItemInput): Promise<Item | null> {

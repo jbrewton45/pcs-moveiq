@@ -1,0 +1,13 @@
+{
+  "name": "pcs-moveiq",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Monorepo root — signals Nixpacks to use the Node provider. Backend lives in ./server, frontend in ./client.",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "cd server && npm ci && npm run build",
+    "start": "node server/dist/index.js"
+  }
+}

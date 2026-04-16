@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import type { Project, Room, Item, Recommendation, MoveType, HousingAssumption, UserGoal } from "../types";
 import { api } from "../api";
 import { ConfirmSheet } from "./ui/ConfirmSheet";
+import { PriorityPanel } from "./PriorityPanel";
+import { RevenueSummary } from "./RevenueSummary";
+import { CalibrationPanel } from "./CalibrationPanel";
 
 function formatDate(iso: string) {
   if (!iso) return "—";
@@ -27,7 +30,7 @@ const ROOM_TYPES = [
   "Other",
 ];
 
-const REC_ORDER: Recommendation[] = ["SELL_NOW", "SELL_SOON", "SHIP", "STORE", "DONATE", "DISCARD", "KEEP"];
+const REC_ORDER: Recommendation[] = ["SELL_NOW", "SELL_SOON", "SHIP", "STORE", "DONATE", "DISCARD", "KEEP", "COMPLETE"];
 
 const REC_LABELS: Record<Recommendation, string> = {
   SELL_NOW: "Sell Now",
@@ -37,6 +40,7 @@ const REC_LABELS: Record<Recommendation, string> = {
   DONATE: "Donate",
   DISCARD: "Discard",
   KEEP: "Keep",
+  COMPLETE: "Sold",
 };
 
 interface PcsCountdownProps {
@@ -724,6 +728,16 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
         hardMoveDate={project.hardMoveDate}
         optionalPackoutDate={project.optionalPackoutDate}
       />
+
+      <RevenueSummary projectId={projectId} refreshKey={localRoomsKey} />
+
+      <PriorityPanel
+        projectId={projectId}
+        onSelectRoom={onSelectRoom}
+        onItemChanged={() => setLocalRoomsKey((k) => k + 1)}
+      />
+
+      <CalibrationPanel projectId={projectId} refreshKey={localRoomsKey} />
 
       {totalItems > 0 && !editingProject && (
         <div className="items-search">

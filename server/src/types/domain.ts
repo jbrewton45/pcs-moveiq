@@ -24,7 +24,8 @@ export type Recommendation =
   | "STORE"
   | "DONATE"
   | "DISCARD"
-  | "KEEP";
+  | "KEEP"
+  | "COMPLETE"; // Phase 10: terminal state after an item is sold
 
 export type ItemStatus =
   | "UNREVIEWED"
@@ -100,6 +101,77 @@ export interface Room {
   updatedAt: string;
 }
 
+// ── Room visualization ──────────────────────────────────────────────────────
+
+/** 4x4 pose collapsed to the fields we need for top-down rendering. */
+export interface RoomTransform {
+  x: number;        // metres, room-local
+  y: number;        // metres (height above floor — informational in V1)
+  z: number;        // metres, room-local
+  rotationY: number; // radians about Y (up)
+}
+
+export interface RoomScanWall {
+  index: number;
+  transform: RoomTransform;
+  widthM: number;
+  heightM: number;
+  confidence: 0 | 1 | 2; // 0=low, 1=medium, 2=high
+}
+
+export interface RoomScanOpening {
+  type: "door" | "window";
+  /** wall index this opening was snapped to, or null if none (free-floating). */
+  wallIndex: number | null;
+  transform: RoomTransform;
+  /** Room-local (x, z) in metres. Always present so the renderer can draw the
+   *  opening even when wallIndex is null. */
+  absolutePosition: { x: number; z: number };
+  widthM: number;
+  heightM: number;
+  confidence: 0 | 1 | 2;
+}
+
+export interface RoomScanObject {
+  /** Stable id assigned by the plugin per scan so items can reference it. */
+  objectId: string;
+  label: string;
+  transform: RoomTransform;
+  widthM: number;
+  heightM: number;
+  depthM: number;
+  confidence: 0 | 1 | 2;
+}
+
+export type RoomScanAreaSource = "shoelace" | "bbox";
+
+export interface RoomScan {
+  id: string;
+  roomId: string;
+  schemaVersion: number;
+  widthM: number;
+  lengthM: number;
+  heightM: number;
+  areaSqM: number;
+  areaSqFt: number;
+  /** "shoelace" = polygon-closed shoelace area; "bbox" = width*length fallback. */
+  areaSource: RoomScanAreaSource;
+  wallCount: number;
+  doorCount: number;
+  windowCount: number;
+  polygonClosed: boolean;
+  hasCurvedWalls: boolean;
+  floorPolygon: Array<{ x: number; z: number }>;
+  walls: RoomScanWall[];
+  openings: RoomScanOpening[];
+  objects: RoomScanObject[];
+  /** Phase 15: absolute on-device path to a USDZ export (iOS only). */
+  usdzPath?: string;
+  scannedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ClarificationQuestion {
   field: string;       // e.g. "lensIncluded", "shutterCount", "majorDamage"
   question: string;    // human-readable question
@@ -150,6 +222,15 @@ export interface Item {
   pricingLastUpdatedAt?: string;
   pendingClarifications?: string; // JSON-serialized ClarificationQuestion[]
   clarificationAnswers?: string;  // JSON-serialized Record<string, string>
+  // Room placement (nullable; set when user tags item in RoomViewer)
+  roomObjectId?: string;
+  roomPositionX?: number;
+  roomPositionZ?: number;
+  rotationY?: number;
+  // Phase 10: URL the user posted this item at (FB Marketplace etc.)
+  listingUrl?: string;
+  // Phase 11: realized sell price in USD (set when the item is marked sold)
+  soldPriceUsd?: number;
   createdAt: string;
   updatedAt: string;
 }

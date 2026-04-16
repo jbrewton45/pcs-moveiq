@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
+import { getUploadsDir } from "./data/storage.js";
 import { healthRouter } from "./routes/health.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { projectsRouter } from "./routes/projects.routes.js";
@@ -11,6 +12,7 @@ import { providersRouter } from "./routes/providers.routes.js";
 import { ebayRouter } from "./routes/ebay.routes.js";
 import { ebaySearchRouter } from "./routes/ebay-search.routes.js";
 import { ebayAnalysisRouter } from "./routes/ebay-analysis.routes.js";
+import { calibrationRouter } from "./routes/calibration.routes.js";
 import { requireAuth } from "./middleware/auth.middleware.js";
 
 export const app = express();
@@ -18,8 +20,8 @@ export const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Serve uploaded photos
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+// Serve uploaded photos (Railway volume or local ./uploads)
+app.use("/uploads", express.static(getUploadsDir()));
 
 // API health check
 app.get("/api/health-root", (_req, res) => {
@@ -34,6 +36,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/projects", requireAuth, projectsRouter);
 app.use("/api/rooms", requireAuth, roomsRouter);
 app.use("/api/items", requireAuth, itemsRouter);
+app.use("/api/calibration", requireAuth, calibrationRouter);
 app.use("/api/providers", providersRouter);
 
 // eBay marketplace account deletion notifications (public, no auth)

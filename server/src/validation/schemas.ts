@@ -68,6 +68,103 @@ export const UpdateRoomSchema = z.object({
   roomType: z.string().min(1).optional(),
 });
 
+// ── Decision action ─────────────────────────────────────────────────────────
+
+export const ItemActionSchema = z.object({
+  action: z.enum(["sell", "keep", "ship", "donate", "sold"]),
+  /** Only meaningful when action === "sold"; ignored otherwise. Optional. */
+  soldPriceUsd: z.number().nonnegative().max(1_000_000).optional(),
+});
+
+export const BulkItemActionSchema = z.object({
+  itemIds: z.array(z.string().min(1)).min(1),
+  action: z.enum(["sell", "keep", "ship", "donate", "sold"]),
+});
+
+export const UpdateItemListingSchema = z.object({
+  listingUrl: z.string().min(1).max(2000).nullable(),
+});
+
+export const UpdateItemSoldPriceSchema = z.object({
+  soldPriceUsd: z.number().nonnegative().max(1_000_000).nullable(),
+});
+
+// ── Room visualization payloads ─────────────────────────────────────────────
+
+const TransformSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  z: z.number(),
+  rotationY: z.number(),
+});
+
+const ConfidenceSchema = z.union([z.literal(0), z.literal(1), z.literal(2)]);
+
+const ScanWallSchema = z.object({
+  index: z.number().int().min(0),
+  transform: TransformSchema,
+  widthM: z.number().nonnegative(),
+  heightM: z.number().nonnegative(),
+  confidence: ConfidenceSchema,
+});
+
+const ScanOpeningSchema = z.object({
+  type: z.enum(["door", "window"]),
+  wallIndex: z.number().int().nullable(),
+  transform: TransformSchema,
+  absolutePosition: z.object({ x: z.number(), z: z.number() }),
+  widthM: z.number().nonnegative(),
+  heightM: z.number().nonnegative(),
+  confidence: ConfidenceSchema,
+});
+
+const ScanObjectSchema = z.object({
+  objectId: z.string().min(1),
+  label: z.string().min(1),
+  transform: TransformSchema,
+  widthM: z.number().nonnegative(),
+  heightM: z.number().nonnegative(),
+  depthM: z.number().nonnegative(),
+  confidence: ConfidenceSchema,
+});
+
+export const ItemPlacementSchema = z.object({
+  roomObjectId: z.string().min(1).nullable().optional(),
+  roomPositionX: z.number().nullable().optional(),
+  roomPositionZ: z.number().nullable().optional(),
+  rotationY: z.number().nullable().optional(),
+}).refine(
+  (d) => {
+    const hasObj = typeof d.roomObjectId === "string";
+    const hasPos = typeof d.roomPositionX === "number" || typeof d.roomPositionZ === "number";
+    return !(hasObj && hasPos);
+  },
+  { message: "roomObjectId and roomPositionX/Z are mutually exclusive — tag an object OR pin a coordinate, not both" }
+);
+
+export const RoomScanPayloadSchema = z.object({
+  schemaVersion: z.number().int().min(1),
+  widthM: z.number().nonnegative(),
+  lengthM: z.number().nonnegative(),
+  heightM: z.number().nonnegative(),
+  areaSqM: z.number().nonnegative(),
+  /** Either omit (server derives via sqMToSqFt) or provide explicitly. */
+  areaSqFt: z.number().nonnegative().optional(),
+  areaSource: z.enum(["shoelace", "bbox"]).default("bbox"),
+  wallCount: z.number().int().nonnegative(),
+  doorCount: z.number().int().nonnegative(),
+  windowCount: z.number().int().nonnegative(),
+  polygonClosed: z.boolean().default(false),
+  hasCurvedWalls: z.boolean().default(false),
+  floorPolygon: z.array(z.object({ x: z.number(), z: z.number() })),
+  walls: z.array(ScanWallSchema),
+  openings: z.array(ScanOpeningSchema),
+  objects: z.array(ScanObjectSchema),
+  /** Phase 15: optional on-device USDZ path. */
+  usdzPath: z.string().min(1).max(2000).optional(),
+  scannedAt: z.string().min(1),
+});
+
 export const UpdateProjectSchema = z.object({
   projectName: z.string().min(1).optional(),
   currentLocation: z.string().min(1).optional(),

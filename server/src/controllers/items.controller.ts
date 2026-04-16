@@ -2,15 +2,23 @@ import fs from "fs";
 import path from "path";
 import type { Request, Response } from "express";
 import type { Item, ItemStatus } from "../types/domain.js";
-import { bulkDeleteItems, bulkUpdateStatus, createItem, deleteItem, listItemsByProject, listItemsByRoom, updateItem, submitClarifications } from "../services/items.service.js";
+import { bulkDeleteItems, bulkUpdateStatus, createItem, deleteItem, listItemsByProject, listItemsByRoom, updateItem, updateItemPlacement, updateItemListing, updateItemSoldPrice, applyItemAction, applyBulkItemAction, PlacementValidationError, submitClarifications } from "../services/items.service.js";
 import { getProjectById } from "../services/projects.service.js";
 import { getRoomById } from "../services/rooms.service.js";
-import { BulkDeleteSchema, BulkUpdateStatusSchema, CreateItemSchema, UpdateItemSchema } from "../validation/schemas.js";
+import { prioritizeProject } from "../services/decisions.service.js";
+import { BulkDeleteSchema, BulkItemActionSchema, BulkUpdateStatusSchema, CreateItemSchema, ItemActionSchema, ItemPlacementSchema, UpdateItemListingSchema, UpdateItemSchema, UpdateItemSoldPriceSchema } from "../validation/schemas.js";
 import { rowToItem } from "../utils/converters.js";
 import { z } from "zod/v4";
 import { parseVoiceTranscript, parseVoiceWithPhoto } from "../services/voice.service.js";
 import { identifyItem } from "../services/identification.service.js";
 import { generatePricing } from "../services/pricing.service.js";
+
+export async function getPrioritizedHandler(req: Request, res: Response) {
+  const projectId = req.query.projectId as string | undefined;
+  if (!projectId) return res.status(400).json({ error: "projectId is required" });
+  if (!(await getProjectById(projectId))) return res.status(404).json({ error: "Project not found" });
+  return res.status(200).json(await prioritizeProject(projectId));
+}
 
 export async function getItems(req: Request, res: Response) {
   const projectId = req.query.projectId as string | undefined;
@@ -55,6 +63,66 @@ export async function putItem(req: Request, res: Response) {
   const item = await updateItem(id, result.data);
   if (!item) return res.status(404).json({ error: "Item not found" });
   return res.status(200).json(item);
+}
+
+export async function postItemActionHandler(req: Request, res: Response) {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const parsed = ItemActionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
+  }
+  const updated = await applyItemAction(id, parsed.data.action, { soldPriceUsd: parsed.data.soldPriceUsd });
+  if (!updated) return res.status(404).json({ error: "Item not found" });
+  return res.status(200).json(updated);
+}
+
+export async function postBulkItemActionHandler(req: Request, res: Response) {
+  const parsed = BulkItemActionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
+  }
+  const updated = await applyBulkItemAction(parsed.data.itemIds, parsed.data.action);
+  return res.status(200).json({ updated: updated.length, items: updated });
+}
+
+export async function putItemListingHandler(req: Request, res: Response) {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const parsed = UpdateItemListingSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
+  }
+  const updated = await updateItemListing(id, parsed.data.listingUrl);
+  if (!updated) return res.status(404).json({ error: "Item not found" });
+  return res.status(200).json(updated);
+}
+
+export async function putItemSoldPriceHandler(req: Request, res: Response) {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const parsed = UpdateItemSoldPriceSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
+  }
+  const updated = await updateItemSoldPrice(id, parsed.data.soldPriceUsd);
+  if (!updated) return res.status(404).json({ error: "Item not found" });
+  return res.status(200).json(updated);
+}
+
+export async function putItemPlacementHandler(req: Request, res: Response) {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const parsed = ItemPlacementSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
+  }
+  try {
+    const updated = await updateItemPlacement(id, parsed.data);
+    if (!updated) return res.status(404).json({ error: "Item not found" });
+    return res.status(200).json(updated);
+  } catch (err) {
+    if (err instanceof PlacementValidationError) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    throw err;
+  }
 }
 
 export async function removeItem(req: Request, res: Response) {

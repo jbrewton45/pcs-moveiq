@@ -1,13 +1,15 @@
 import { Router } from "express";
-import { bulkDeleteItemsHandler, bulkUpdateItemStatus, getItems, postItem, putItem, removeItem, submitClarificationsHandler, parseVoice, parseVoicePhoto, batchIdentifyPrice } from "../controllers/items.controller.js";
+import { bulkDeleteItemsHandler, bulkUpdateItemStatus, getItems, getPrioritizedHandler, postBulkItemActionHandler, postItem, postItemActionHandler, putItem, putItemListingHandler, putItemPlacementHandler, putItemSoldPriceHandler, removeItem, submitClarificationsHandler, parseVoice, parseVoicePhoto, batchIdentifyPrice } from "../controllers/items.controller.js";
 import { deleteAdditionalPhoto, deletePhoto, listPhotos, setAdditionalPhotoPrimary, upload, uploadAdditionalPhoto, uploadPhoto } from "../controllers/photos.controller.js";
 import { postIdentify, postConfirmIdentification, postPricing, getComparables } from "../controllers/identification.controller.js";
 
 export const itemsRouter = Router();
 
+itemsRouter.get("/prioritized", getPrioritizedHandler);
 itemsRouter.get("/", getItems);
 itemsRouter.post("/bulk-update", bulkUpdateItemStatus);
 itemsRouter.post("/bulk-delete", bulkDeleteItemsHandler);
+itemsRouter.post("/bulk-action", postBulkItemActionHandler);
 itemsRouter.post("/batch-identify-price", batchIdentifyPrice);
 itemsRouter.post("/parse-voice", parseVoice);
 itemsRouter.post("/parse-voice-photo", upload.single("photo"), parseVoicePhoto);
@@ -23,5 +25,9 @@ itemsRouter.post("/:id/confirm-identification", postConfirmIdentification);
 itemsRouter.post("/:id/pricing", postPricing);
 itemsRouter.get("/:id/comparables", getComparables);
 itemsRouter.post("/:id/clarifications", submitClarificationsHandler);
+itemsRouter.post("/:id/action", postItemActionHandler);
+itemsRouter.put("/:id/listing", putItemListingHandler);
+itemsRouter.put("/:id/sold-price", putItemSoldPriceHandler);
+itemsRouter.put("/:id/placement", putItemPlacementHandler);
 itemsRouter.put("/:id", putItem);
 itemsRouter.delete("/:id", removeItem);

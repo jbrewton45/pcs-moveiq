@@ -1,8 +1,17 @@
-import type { Project, Room, Item, Comparable, ProjectWorkspace, UserPublic, EbayAnalysisResult, SellPriorityResult } from "./types";
+import type { Project, Room, Item, Comparable, ProjectWorkspace, UserPublic, EbayAnalysisResult, SellPriorityResult, RoomScanData, RoomScan, ItemPlacementInput, OrphanedItem, PrioritizedItem, ItemDecisionAction, CategoryCalibration } from "./types";
 import { Capacitor } from "@capacitor/core";
 
 const configuredApiOrigin = (import.meta.env.VITE_API_ORIGIN as string | undefined)?.trim();
-const apiOrigin = configuredApiOrigin ? configuredApiOrigin.replace(/\/$/, "") : "https://pcs-moveiq.replit.app";
+const apiOrigin = configuredApiOrigin ? configuredApiOrigin.replace(/\/$/, "") : "";
+
+if (Capacitor.isNativePlatform() && !apiOrigin) {
+  // Native builds cannot rely on a same-origin proxy; VITE_API_ORIGIN must be
+  // baked in at build time. Fail loudly instead of silently hitting a wrong host.
+  console.error(
+    "[api] VITE_API_ORIGIN is not set. Rebuild the web bundle with VITE_API_ORIGIN=https://<your-railway-domain> before running `npx cap sync ios`."
+  );
+}
+
 const BASE = Capacitor.isNativePlatform() ? `${apiOrigin}/api` : "/api";
 
 export function getUploadUrl(photoPath?: string): string | null {
@@ -30,17 +39,34 @@ function authHeaders(): Record<string, string> {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: authHeaders(),
-    ...options,
-  });
+  const url = `${BASE}${path}`;
+  const method = options?.method ?? "GET";
+  const bodyPreview = typeof options?.body === "string" ? options.body : options?.body ? "[binary body]" : undefined;
+  console.log(`[api] → ${method} ${url}`, bodyPreview ? { body: bodyPreview } : "");
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: authHeaders(),
+      ...options,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    console.error(`[api] ✗ NETWORK FAIL ${method} ${url} — ${detail}`);
+    throw new Error(`Network request failed: ${detail} (url=${url})`);
+  }
+
+  console.log(`[api] ← ${res.status} ${res.statusText} ${url}`);
+
   if (res.status === 401) {
     setToken(null);
     window.dispatchEvent(new Event("moveiq:logout"));
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error((body as Record<string, unknown>).error as string ?? `${res.status} ${res.statusText}`);
+    const msg = (body as Record<string, unknown>).error as string ?? `${res.status} ${res.statusText}`;
+    console.error(`[api] ✗ ${method} ${url} → ${msg}`);
+    throw new Error(msg);
   }
   return res.json() as Promise<T>;
 }
@@ -119,6 +145,68 @@ export const api = {
     fetch(`${BASE}/rooms/${id}`, { method: "DELETE", headers: authHeaders() }).then(res => {
       if (!res.ok) throw new Error("Failed to delete room");
     }),
+
+  // Room visualization — scan persistence
+  putRoomScan: (roomId: string, scan: RoomScanData) =>
+    request<RoomScan>(`/rooms/${roomId}/scan`, { method: "PUT", body: JSON.stringify(scan) }),
+
+  getRoomScan: async (roomId: string): Promise<RoomScan | null> => {
+    try {
+      return await request<RoomScan>(`/rooms/${roomId}/scan`);
+    } catch (err) {
+      // Server returns 404 when there's no scan yet; treat as null rather than an error.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("404") || msg.toLowerCase().includes("no scan")) return null;
+      throw err;
+    }
+  },
+
+  updateItemPlacement: (itemId: string, placement: ItemPlacementInput) =>
+    request<Item>(`/items/${itemId}/placement`, {
+      method: "PUT",
+      body: JSON.stringify(placement),
+    }),
+
+  getOrphanedItems: (roomId: string) =>
+    request<OrphanedItem[]>(`/rooms/${roomId}/orphaned-items`),
+
+  getPrioritizedItems: (projectId: string) =>
+    request<PrioritizedItem[]>(`/items/prioritized?projectId=${encodeURIComponent(projectId)}`),
+
+  applyItemAction: (
+    itemId: string,
+    action: ItemDecisionAction,
+    opts: { soldPriceUsd?: number } = {}
+  ) =>
+    request<Item>(`/items/${itemId}/action`, {
+      method: "POST",
+      body: JSON.stringify(
+        opts.soldPriceUsd !== undefined
+          ? { action, soldPriceUsd: opts.soldPriceUsd }
+          : { action }
+      ),
+    }),
+
+  applyBulkItemAction: (itemIds: string[], action: ItemDecisionAction) =>
+    request<{ updated: number; items: Item[] }>(`/items/bulk-action`, {
+      method: "POST",
+      body: JSON.stringify({ itemIds, action }),
+    }),
+
+  updateItemListing: (itemId: string, listingUrl: string | null) =>
+    request<Item>(`/items/${itemId}/listing`, {
+      method: "PUT",
+      body: JSON.stringify({ listingUrl }),
+    }),
+
+  updateItemSoldPrice: (itemId: string, soldPriceUsd: number | null) =>
+    request<Item>(`/items/${itemId}/sold-price`, {
+      method: "PUT",
+      body: JSON.stringify({ soldPriceUsd }),
+    }),
+
+  getCalibration: (projectId: string) =>
+    request<CategoryCalibration[]>(`/calibration?projectId=${encodeURIComponent(projectId)}`),
 
   bulkUpdateStatus: (itemIds: string[], status: string) =>
     request<{ updated: number }>("/items/bulk-update", { method: "POST", body: JSON.stringify({ itemIds, status }) }),

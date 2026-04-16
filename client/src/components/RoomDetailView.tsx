@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { Item, ItemCondition, ItemStatus, SizeClass, Recommendation, Comparable, ComparableSource, ClarificationQuestion } from "../types";
+import type { Item, ItemCondition, ItemStatus, SizeClass, Recommendation, Comparable, ComparableSource, ClarificationQuestion, RoomScan } from "../types";
 import { api, getUploadUrl } from "../api";
 import { VoiceCapture } from "./VoiceCapture";
 import { BottomSheet } from "./ui/BottomSheet";
 import { ConfirmSheet } from "./ui/ConfirmSheet";
+import { RoomViewer } from "./RoomViewer";
 
 function label(s: string) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -21,6 +22,7 @@ const REC_BADGE_TEXT: Record<Recommendation, string> = {
   DONATE: "Donate",
   DISCARD: "Discard",
   KEEP: "Keep",
+  COMPLETE: "Sold",
 };
 
 const REC_BADGE_CLASS: Record<Recommendation, string> = {
@@ -31,6 +33,7 @@ const REC_BADGE_CLASS: Record<Recommendation, string> = {
   DONATE: "rec-badge--donate",
   DISCARD: "rec-badge--discard",
   KEEP: "rec-badge--keep",
+  COMPLETE: "rec-badge--store",
 };
 
 interface RecBadgeProps {
@@ -910,6 +913,29 @@ export function RoomDetailView({
       .finally(() => setLoading(false));
   }, [roomId, refreshKey]);
 
+  // Room scan (Phase 3 — visualization)
+  const [roomScan, setRoomScan] = useState<RoomScan | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.getRoomScan(roomId)
+      .then(scan => { if (!cancelled) setRoomScan(scan); })
+      .catch(() => { if (!cancelled) setRoomScan(null); });
+    return () => { cancelled = true; };
+  }, [roomId, refreshKey]);
+
+  // Priority scores for every item in this project (Phase 6) — drives the
+  // amber halo on high-priority markers in the RoomViewer.
+  const [priorityByItemId, setPriorityByItemId] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    api.getPrioritizedItems(projectId)
+      .then(list => {
+        if (!cancelled) setPriorityByItemId(Object.fromEntries(list.map(p => [p.itemId, p.score])));
+      })
+      .catch(() => { if (!cancelled) setPriorityByItemId({}); });
+    return () => { cancelled = true; };
+  }, [projectId, refreshKey]);
+
   async function handleAddItem(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
@@ -1138,6 +1164,18 @@ export function RoomDetailView({
           {roomWeight > 0 && <p className="room-weight-total">Est. weight: {roomWeight} lbs</p>}
         </div>
       </div>
+
+      {roomScan && (
+        <section style={{ marginBottom: "var(--space-4)" }}>
+          <h3 className="section-heading" style={{ marginBottom: "var(--space-3)" }}>Room Layout</h3>
+          <RoomViewer
+            scan={roomScan}
+            items={items}
+            onPlacementChanged={() => setRefreshKey(k => k + 1)}
+            priorityByItemId={priorityByItemId}
+          />
+        </section>
+      )}
 
       <section>
         <div className="section-heading-row">

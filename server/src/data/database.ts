@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -9,6 +9,23 @@ const pool = new Pool({
 
 export async function query(sql: string, params: unknown[] = []) {
   return pool.query(sql, params);
+}
+
+/** Run `fn` inside a Postgres transaction on a dedicated connection.
+ *  Commits on resolve; rolls back on any thrown error; always releases. */
+export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch { /* swallow rollback-of-rollback */ }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function initializeSchema() {
@@ -128,5 +145,52 @@ export async function initializeSchema() {
         WHERE ip."itemId" = i.id
           AND ip."photoPath" = i."photoPath"
       );
+
+    -- Room visualization: most-recent scan per room (one-to-one via UNIQUE roomId)
+    -- jsonb is used for geometry blobs so the scan is round-tripped as one document.
+    CREATE TABLE IF NOT EXISTS room_scans (
+      id              TEXT PRIMARY KEY,
+      "roomId"        TEXT NOT NULL UNIQUE REFERENCES rooms(id) ON DELETE CASCADE,
+      "schemaVersion" INTEGER NOT NULL DEFAULT 1,
+      "widthM"        DOUBLE PRECISION NOT NULL,
+      "lengthM"       DOUBLE PRECISION NOT NULL,
+      "heightM"       DOUBLE PRECISION NOT NULL,
+      "areaSqM"       DOUBLE PRECISION NOT NULL,
+      "areaSqFt"      DOUBLE PRECISION NOT NULL,
+      "areaSource"    TEXT NOT NULL DEFAULT 'bbox',
+      "wallCount"     INTEGER NOT NULL DEFAULT 0,
+      "doorCount"     INTEGER NOT NULL DEFAULT 0,
+      "windowCount"   INTEGER NOT NULL DEFAULT 0,
+      "polygonClosed" BOOLEAN NOT NULL DEFAULT FALSE,
+      "hasCurvedWalls" BOOLEAN NOT NULL DEFAULT FALSE,
+      "floorPolygon"  JSONB NOT NULL DEFAULT '[]'::jsonb,
+      walls           JSONB NOT NULL DEFAULT '[]'::jsonb,
+      openings        JSONB NOT NULL DEFAULT '[]'::jsonb,
+      objects         JSONB NOT NULL DEFAULT '[]'::jsonb,
+      "scannedAt"     TEXT NOT NULL,
+      "createdAt"     TEXT NOT NULL,
+      "updatedAt"     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS room_scans_room_id_idx ON room_scans ("roomId");
+
+    -- Phase 15: on-device USDZ file path for native iOS Quick Look.
+    -- Stored as a string so older devices that couldn't export get NULL.
+    ALTER TABLE room_scans ADD COLUMN IF NOT EXISTS "usdzPath" TEXT;
+
+    -- Item placement columns (nullable; set by tag-to-room flow). Added via
+    -- guarded ALTERs so existing installs upgrade in place without a migration tool.
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "roomObjectId" TEXT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "roomPositionX" DOUBLE PRECISION;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "roomPositionZ" DOUBLE PRECISION;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "rotationY" DOUBLE PRECISION;
+
+    -- Phase 10: optional listing URL (Facebook Marketplace / OfferUp / etc.)
+    -- Nullable; set after the user posts the item for sale elsewhere.
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "listingUrl" TEXT;
+
+    -- Phase 11: realized sell price in USD. Nullable; set when the item
+    -- actually sells so we can show revenue totals and feed back into future
+    -- recommendations.
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "soldPriceUsd" REAL;
   `);
 }

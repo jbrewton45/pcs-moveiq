@@ -1,73 +1,37 @@
-import { registerPlugin } from "@capacitor/core";
+import { registerPlugin, Capacitor } from "@capacitor/core";
+import type {
+  RoomScanData,
+  ScannedWall,
+  ScannedOpening,
+  ScannedObject,
+  FloorPoint,
+} from "../types";
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Types returned from the native RoomPlan scan
-// ─────────────────────────────────────────────────────────────────────────────
+// Re-export so existing imports from this module keep working.
+export type {
+  RoomScanData,
+  ScannedWall,
+  ScannedOpening,
+  ScannedObject,
+  FloorPoint,
+};
 
-export interface FloorPoint {
-  /** Metres along the X axis */
-  x: number;
-  /** Metres along the Z axis (depth) */
-  z: number;
-}
-
-export interface ScannedWall {
-  widthM: number;
-  heightM: number;
-  /** 0 = low, 1 = medium, 2 = high */
-  confidence: number;
-}
-
-export interface ScannedOpening {
-  widthM: number;
-  heightM: number;
-  confidence: number;
-}
-
-export interface ScannedObject {
-  /** RoomPlan category label e.g. "sofa", "television", "bed" */
-  label: string;
-  widthM: number;
-  heightM: number;
-  depthM: number;
-  confidence: number;
-}
-
-export interface RoomScanResult {
-  /** Overall bounding-box width in metres */
-  widthM: number;
-  /** Overall bounding-box length (depth) in metres */
-  lengthM: number;
-  /** Approximate floor area in square metres */
-  areaSqM: number;
-  /** 2-D floor polygon points (metres) */
-  floorPolygon: FloorPoint[];
-  walls: ScannedWall[];
-  doors: ScannedOpening[];
-  windows: ScannedOpening[];
-  objects: ScannedObject[];
-  wallCount: number;
-  doorCount: number;
-  windowCount: number;
-}
+/** Historical alias — the plugin emits a full RoomScanData payload. */
+export type RoomScanResult = RoomScanData;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Plugin interface
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface RoomScanPluginDefinition {
-  /**
-   * Launch the RoomPlan scanning UI.
-   * Resolves with scan results when the user taps "Done".
-   * Rejects if the device doesn't support LiDAR or the user cancels.
-   */
+  /** Launch the native RoomPlan scanning UI. Resolves with the scan on Done. */
   startScan(): Promise<RoomScanResult>;
-
   /** Programmatically stop a running scan session. */
   stopScan(): Promise<void>;
-
-  /** Returns whether the current device has a LiDAR sensor (iPhone 12 Pro+). */
+  /** Returns whether the current device has LiDAR + iOS 16+. */
   checkSupport(): Promise<{ supported: boolean }>;
+  /** Phase 15: open a USDZ file in native iOS Quick Look (supports AR). */
+  previewUSDZ(options: { path: string }): Promise<void>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,9 +41,7 @@ export interface RoomScanPluginDefinition {
 class RoomScanPluginWeb implements RoomScanPluginDefinition {
   startScan(): Promise<RoomScanResult> {
     return Promise.reject(
-      new Error(
-        "LiDAR room scanning is only available on iPhone 12 Pro or later with the iOS native app."
-      )
+      new Error("LiDAR room scanning is only available in the iOS native app on a LiDAR-equipped iPhone Pro / iPad Pro.")
     );
   }
 
@@ -90,6 +52,10 @@ class RoomScanPluginWeb implements RoomScanPluginDefinition {
   checkSupport(): Promise<{ supported: boolean }> {
     return Promise.resolve({ supported: false });
   }
+
+  previewUSDZ(_: { path: string }): Promise<void> {
+    return Promise.reject(new Error("3D preview is only available in the iOS native app."));
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -97,16 +63,69 @@ class RoomScanPluginWeb implements RoomScanPluginDefinition {
 //  and falls back to RoomScanPluginWeb on other platforms.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const RoomScanPlugin = registerPlugin<RoomScanPluginDefinition>(
-  "RoomScanPlugin",
-  { web: () => new RoomScanPluginWeb() }
+console.log(
+  `[RoomScanPlugin] module load — platform=${Capacitor.getPlatform()} native=${Capacitor.isNativePlatform()}`
 );
+
+const nativePlugin = registerPlugin<RoomScanPluginDefinition>("RoomScanPlugin", {
+  web: () => new RoomScanPluginWeb(),
+});
+
+// Diagnostic proxy — logs every call + caught error verbatim so the root
+// cause of an UNIMPLEMENTED or similar Capacitor error is visible in the
+// Xcode / Safari Web Inspector console instead of just bubbling a string.
+export const RoomScanPlugin: RoomScanPluginDefinition = {
+  async startScan() {
+    console.log("[RoomScanPlugin] → startScan()");
+    try {
+      const res = await nativePlugin.startScan();
+      console.log(
+        `[RoomScanPlugin] ← startScan ok — walls=${res.wallCount} doors=${res.doorCount} windows=${res.windowCount} objects=${res.objects?.length ?? 0} areaSqM=${res.areaSqM?.toFixed?.(2) ?? res.areaSqM} source=${res.areaSource} closed=${res.polygonClosed}`
+      );
+      return res;
+    } catch (err) {
+      console.error("[RoomScanPlugin] ✗ startScan error", err);
+      throw err;
+    }
+  },
+  async stopScan() {
+    console.log("[RoomScanPlugin] → stopScan()");
+    try {
+      await nativePlugin.stopScan();
+      console.log("[RoomScanPlugin] ← stopScan ok");
+    } catch (err) {
+      console.error("[RoomScanPlugin] ✗ stopScan error", err);
+      throw err;
+    }
+  },
+  async checkSupport() {
+    console.log("[RoomScanPlugin] → checkSupport()");
+    try {
+      const res = await nativePlugin.checkSupport();
+      console.log("[RoomScanPlugin] ← checkSupport ok", res);
+      return res;
+    } catch (err) {
+      console.error("[RoomScanPlugin] ✗ checkSupport error", err);
+      throw err;
+    }
+  },
+  async previewUSDZ(options) {
+    console.log(`[RoomScanPlugin] → previewUSDZ(${options?.path})`);
+    try {
+      await nativePlugin.previewUSDZ(options);
+      console.log("[RoomScanPlugin] ← previewUSDZ ok");
+    } catch (err) {
+      console.error("[RoomScanPlugin] ✗ previewUSDZ error", err);
+      throw err;
+    }
+  },
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Utility helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Convert square metres to square feet */
+/** Convert square metres to square feet (rounded to the nearest foot). */
 export function sqMToSqFt(sqM: number): number {
   return Math.round(sqM * 10.764);
 }
@@ -119,7 +138,7 @@ export function mToFtIn(m: number): string {
   return `${feet}' ${inches}"`;
 }
 
-/** Human-readable confidence label */
+/** Human-readable confidence label (accepts numeric 0/1/2). */
 export function confidenceLabel(value: number): string {
   return value >= 2 ? "High" : value >= 1 ? "Medium" : "Low";
 }
