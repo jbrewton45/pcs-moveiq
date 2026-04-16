@@ -170,6 +170,14 @@ export const api = {
   getOrphanedItems: (roomId: string) =>
     request<OrphanedItem[]>(`/rooms/${roomId}/orphaned-items`),
 
+  // Phase 16: edit a detected object's user-supplied label.
+  //   pass null to clear the override and fall back to the detected label.
+  updateRoomObject: (roomId: string, objectId: string, patch: { userLabel: string | null }) =>
+    request<RoomScan>(`/rooms/${roomId}/object/${objectId}`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+
   getPrioritizedItems: (projectId: string) =>
     request<PrioritizedItem[]>(`/items/prioritized?projectId=${encodeURIComponent(projectId)}`),
 

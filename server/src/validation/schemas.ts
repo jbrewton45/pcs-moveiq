@@ -121,11 +121,19 @@ const ScanOpeningSchema = z.object({
 const ScanObjectSchema = z.object({
   objectId: z.string().min(1),
   label: z.string().min(1),
+  /** Phase 16: user-supplied label override (preserved across scan uploads). */
+  userLabel: z.string().min(1).max(100).optional(),
   transform: TransformSchema,
   widthM: z.number().nonnegative(),
   heightM: z.number().nonnegative(),
   depthM: z.number().nonnegative(),
   confidence: ConfidenceSchema,
+});
+
+// Phase 16: PUT /api/rooms/:id/object/:objectId payload.
+// Set userLabel to a string to rename; send null to clear the override.
+export const UpdateRoomObjectSchema = z.object({
+  userLabel: z.string().min(1).max(100).nullable(),
 });
 
 export const ItemPlacementSchema = z.object({

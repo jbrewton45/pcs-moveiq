@@ -136,6 +136,10 @@ export interface RoomScanObject {
   /** Stable id assigned by the plugin per scan so items can reference it. */
   objectId: string;
   label: string;
+  /** Phase 16: user-supplied override. UI should fall back to `label` if absent.
+   *  Never overwrite `label` — the original RoomPlan detection is preserved so
+   *  it can still be used for auto-matching / suggestions. */
+  userLabel?: string;
   transform: RoomTransform;
   widthM: number;
   heightM: number;

@@ -368,22 +368,22 @@ extension RoomScanPlugin: RoomCaptureViewControllerDelegate {
             if d < nearestDist { nearestDist = d; nearestIdx = i }
         }
 
-        let wallIndexValue: Any
-        if let idx = nearestIdx, nearestDist <= 1.0 {
-            wallIndexValue = idx
-        } else {
-            wallIndexValue = NSNull()
-        }
-
-        return [
+        // Build the dict with concrete types first; assign wallIndex after so
+        // we can use Int | NSNull without tripping the Any → JSValue coercion.
+        var opening: JSObject = [
             "type": type,
-            "wallIndex": wallIndexValue,
             "transform": extractTransform(m),
-            "absolutePosition": ["x": absX, "z": absZ],
+            "absolutePosition": ["x": absX, "z": absZ] as JSObject,
             "widthM": Double(surface.dimensions.x),
             "heightM": Double(surface.dimensions.y),
             "confidence": confidenceInt(surface.confidence)
         ]
+        if let idx = nearestIdx, nearestDist <= 1.0 {
+            opening["wallIndex"] = idx
+        } else {
+            opening["wallIndex"] = NSNull()
+        }
+        return opening
     }
 }
 

@@ -121,6 +121,9 @@ export interface ScannedObject {
   objectId: string;
   /** RoomPlan category label e.g. "sofa", "bed", "television". */
   label: string;
+  /** Phase 16: user override — rendered instead of `label` when present.
+   *  The original `label` is preserved for auto-matching / suggestions. */
+  userLabel?: string;
   transform: RoomTransform;
   widthM: number;
   heightM: number;

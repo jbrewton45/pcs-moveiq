@@ -5,6 +5,8 @@ import { ConfirmSheet } from "./ui/ConfirmSheet";
 import { PriorityPanel } from "./PriorityPanel";
 import { RevenueSummary } from "./RevenueSummary";
 import { CalibrationPanel } from "./CalibrationPanel";
+import { ProgressBar } from "./ProgressBar";
+import { DECIDED_STATUSES } from "../lib/progress";
 
 function formatDate(iso: string) {
   if (!iso) return "—";
@@ -399,7 +401,7 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
         const reviewed: Record<string, number> = {};
         for (const item of fetchedItems) {
           counts[item.roomId] = (counts[item.roomId] ?? 0) + 1;
-          if (item.status !== "UNREVIEWED") {
+          if (DECIDED_STATUSES.has(item.status)) {
             reviewed[item.roomId] = (reviewed[item.roomId] ?? 0) + 1;
           }
         }
@@ -729,6 +731,8 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
         optionalPackoutDate={project.optionalPackoutDate}
       />
 
+      {allItems.length > 0 && <ProgressBar items={allItems} label="Move progress" />}
+
       <RevenueSummary projectId={projectId} refreshKey={localRoomsKey} />
 
       <PriorityPanel
@@ -915,7 +919,7 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
                         {count > 0 && (
                           <div className="room-card__progress">
                             <p className="room-card__progress-label">
-                              {rev} / {count} {rev === count ? "done" : "reviewed"}
+                              {rev} / {count} {rev === count ? "complete" : "done"}
                             </p>
                             <div className="room-card__progress-track">
                               <div

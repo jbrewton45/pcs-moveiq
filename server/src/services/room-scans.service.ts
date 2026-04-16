@@ -123,3 +123,42 @@ export async function upsertRoomScan(
   }
   return scan;
 }
+
+/**
+ * Phase 16: update a single RoomScanObject inside the scan's `objects` JSONB.
+ * Preserves every other field on the target object AND every other object in
+ * the array. The original `label` is never overwritten — only `userLabel`.
+ *
+ * Returns the refreshed RoomScan, or null if:
+ *   - there is no scan for the room, or
+ *   - the scan has no object with the given objectId.
+ */
+export async function updateRoomObjectLabel(
+  roomId: string,
+  objectId: string,
+  userLabel: string | null,
+): Promise<RoomScan | null> {
+  const scan = await getRoomScan(roomId);
+  if (!scan) return null;
+
+  const idx = scan.objects.findIndex((o) => o.objectId === objectId);
+  if (idx === -1) return null;
+
+  const nextObjects = scan.objects.map((o, i) => {
+    if (i !== idx) return o;
+    if (userLabel == null || userLabel.trim() === "") {
+      // Clear the override — omit the field so it round-trips as absent.
+      const { userLabel: _dropped, ...rest } = o;
+      return rest;
+    }
+    return { ...o, userLabel: userLabel.trim() };
+  });
+
+  const now = new Date().toISOString();
+  await query(
+    'UPDATE room_scans SET objects = $1::jsonb, "updatedAt" = $2 WHERE "roomId" = $3',
+    [JSON.stringify(nextObjects), now, roomId],
+  );
+
+  return getRoomScan(roomId);
+}

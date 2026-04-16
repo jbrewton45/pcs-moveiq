@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { getRoomById, getOrphanedItems } from "../services/rooms.service.js";
-import { getRoomScan, upsertRoomScan } from "../services/room-scans.service.js";
-import { RoomScanPayloadSchema } from "../validation/schemas.js";
+import { getRoomScan, upsertRoomScan, updateRoomObjectLabel } from "../services/room-scans.service.js";
+import { RoomScanPayloadSchema, UpdateRoomObjectSchema } from "../validation/schemas.js";
 
 /**
  * GET /api/rooms/:id/scan
@@ -57,4 +57,34 @@ export async function getOrphanedItemsHandler(req: Request, res: Response) {
 
   const orphaned = await getOrphanedItems(id);
   return res.status(200).json(orphaned);
+}
+
+/**
+ * Phase 16: PUT /api/rooms/:id/object/:objectId
+ * Body: { userLabel: string | null }
+ *
+ * Writes a user-supplied override label on a scanned object. The original
+ * `label` is preserved. Send `null` to clear the override.
+ */
+export async function putRoomObjectHandler(req: Request, res: Response) {
+  const roomId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const objectId = Array.isArray(req.params.objectId) ? req.params.objectId[0] : req.params.objectId;
+
+  const room = await getRoomById(roomId);
+  if (!room) return res.status(404).json({ error: "Room not found" });
+
+  const parsed = UpdateRoomObjectSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "Validation failed",
+      details: parsed.error.issues,
+    });
+  }
+
+  const updated = await updateRoomObjectLabel(roomId, objectId, parsed.data.userLabel);
+  if (!updated) {
+    return res.status(404).json({ error: "Scan or object not found" });
+  }
+
+  return res.status(200).json(updated);
 }
