@@ -1,9 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
-import fs from "fs";
+import fs from "fs/promises";
 import path from "path";
 import type { ComparableCandidate } from "../types/providers.js";
-
-const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+import { getUploadsDir } from "../data/storage.js";
+import { GENERIC_NAMES, isGenericName, isGenericCategory } from "../utils/identification-quality.js";
 
 let client: Anthropic | null = null;
 
@@ -28,13 +28,56 @@ interface IdentificationInput {
   notes?: string;
 }
 
-interface IdentificationOutput {
+export interface IdentificationOutput {
   identifiedName: string;
   identifiedCategory: string;
   identifiedBrand?: string;
   identifiedModel?: string;
   confidence: number;
   reasoning: string;
+  isSpecialty?: boolean;
+  clarifications?: Array<{
+    field: string;
+    question: string;
+    inputType: "boolean" | "text" | "select";
+    options?: string[];
+  }>;
+}
+
+const IDENTIFY_TIMEOUT_MS = 30_000;
+const PRICING_TIMEOUT_MS = 20_000;
+const RETRY_DELAY_MS = 2_000;
+
+function isRetryable(err: unknown): boolean {
+  if (err instanceof Anthropic.RateLimitError) return true;
+  if (err instanceof Anthropic.InternalServerError) return true;
+  if (err instanceof Anthropic.APIConnectionError) return true;
+  if (err instanceof Error && err.name === "AbortError") return true;
+  return false;
+}
+
+async function callWithRetry<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const result = await fn(controller.signal);
+      return result;
+    } catch (err) {
+      if (attempt === 0 && isRetryable(err)) {
+        console.warn(`[Claude] retryable error (attempt 1), retrying in ${RETRY_DELAY_MS}ms:`, err instanceof Error ? err.message : err);
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error("unreachable");
 }
 
 export async function claudeIdentify(input: IdentificationInput): Promise<IdentificationOutput | null> {
@@ -44,11 +87,10 @@ export async function claudeIdentify(input: IdentificationInput): Promise<Identi
   try {
     const contentParts: Anthropic.MessageCreateParams["messages"][0]["content"] = [];
 
-    // Add photo if available
     if (input.photoPath) {
-      const filePath = path.join(UPLOADS_DIR, input.photoPath);
-      if (fs.existsSync(filePath)) {
-        const imageData = fs.readFileSync(filePath);
+      const filePath = path.join(getUploadsDir(), input.photoPath);
+      try {
+        const imageData = await fs.readFile(filePath);
         const base64 = imageData.toString("base64");
         const ext = path.extname(input.photoPath).toLowerCase();
         const mediaType = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
@@ -56,6 +98,8 @@ export async function claudeIdentify(input: IdentificationInput): Promise<Identi
           type: "image",
           source: { type: "base64", media_type: mediaType, data: base64 },
         });
+      } catch {
+        console.warn(`[Claude] photo not found: ${filePath}, proceeding text-only`);
       }
     }
 
@@ -63,7 +107,7 @@ export async function claudeIdentify(input: IdentificationInput): Promise<Identi
       type: "text",
       text: `You are helping identify a household item for a military PCS (Permanent Change of Station) move.
 
-Current item details:
+Seller-provided context (MAY BE PLACEHOLDERS):
 - Name: ${input.itemName}
 - Category: ${input.category}
 - Condition: ${input.condition}
@@ -71,40 +115,99 @@ Current item details:
 ${input.notes ? `- Notes: ${input.notes}` : ""}
 ${input.photoPath ? "A photo of the item is attached." : "No photo is available."}
 
-Please identify this item as precisely as possible. Return a JSON object with these fields:
+IMPORTANT: The "Name" and "Category" above may be auto-generated placeholders from a room scan (for example, "Scanned Item" or "Uncategorized"). IGNORE those placeholder values entirely and identify the item from the photo and notes. Do not echo the placeholder back as your answer.
+
+IDENTIFICATION REQUIREMENTS
+
+identifiedName: Describe what the item actually is, using the item type plus at least one distinguishing attribute (brand, material, color, form factor, or use). Good examples:
+- "Ryobi 18V cordless fan"
+- "KitchenAid stand mixer"
+- "IKEA Malm 6-drawer dresser"
+- "Sony A7R III mirrorless camera body"
+When brand is not visible, a generic-but-specific type is acceptable:
+- "cordless drill"
+- "upholstered loveseat"
+- "gas-powered leaf blower"
+
+FORBIDDEN identifiedName values (case-insensitive, never return any of these): "Scanned Item", "Item", "Unknown Item", "Uncategorized", "Object", "Misc", "Household Item". If you truly cannot tell what the item is, return a best-effort generic type like "unidentified small appliance", "unidentified piece of furniture", or "unidentified kitchen tool" with a LOW confidence value (around 0.2). NEVER return a placeholder name.
+
+identifiedCategory: Must be exactly one of this fixed list (pick the best fit):
+Furniture, Electronics, Appliance, Kitchen, Tools, Sporting Goods, Outdoor, Toys, Clothing, Decor, Media, Linens, Baby, Pet, Office, Other.
+Do NOT return "Uncategorized".
+
+identifiedBrand / identifiedModel: Fill ONLY if you can actually read the brand or model on the item (logo, nameplate, sticker, product casing). If not visible, return null. Do NOT guess a brand or model from appearance alone.
+
+Confidence bands (be honest):
+- >= 0.75 (STRONG): Clear photo AND either brand/model is visible on the item OR the item is universally recognizable (e.g., a standard IKEA bookshelf, a well-known gaming console).
+- 0.50 - 0.75 (MEDIUM): Confident on type and category, but brand/model uncertain, or the photo shows only part of the item.
+- < 0.50 (WEAK): No photo, blurry photo, or only a generic guess possible. Use ~0.2 for an "unidentified <type>" fallback.
+
+Specialty/high-value item detection: cameras (DSLRs, mirrorless), musical instruments (guitars, keyboards, violins), collectibles (trading cards, coins, art), power tools (drills, saws, compressors), designer items (handbags, watches), gaming consoles, premium appliances (KitchenAid, Vitamix, Dyson), premium exercise equipment (Peloton, NordicTrack) should all have isSpecialty: true.
+
+Clarification questions: Generate 1-3 questions ONLY when a missing fact would materially change pricing by more than 20%. Do NOT ask clarifying questions for common household items.
+
+Return a JSON object with these exact fields and no other text:
 {
-  "identifiedName": "specific name of the item",
-  "identifiedCategory": "refined category",
-  "identifiedBrand": "brand if identifiable, or null",
-  "identifiedModel": "model if identifiable, or null",
+  "identifiedName": "specific name of the item (never a forbidden placeholder)",
+  "identifiedCategory": "one of: Furniture, Electronics, Appliance, Kitchen, Tools, Sporting Goods, Outdoor, Toys, Clothing, Decor, Media, Linens, Baby, Pet, Office, Other",
+  "identifiedBrand": "brand only if visibly readable on the item, else null",
+  "identifiedModel": "model only if visibly readable on the item, else null",
   "confidence": 0.0 to 1.0,
-  "reasoning": "brief explanation of your identification"
+  "reasoning": "brief explanation of your identification",
+  "isSpecialty": true or false,
+  "clarifications": [
+    {
+      "field": "shortCamelCaseKey",
+      "question": "Human-readable question?",
+      "inputType": "boolean" or "text" or "select",
+      "options": ["Option A", "Option B"] or null
+    }
+  ]
 }
 
-Rules:
-- confidence should reflect how certain you are
-- if no photo, confidence should generally be lower (0.3-0.6)
-- with a clear photo, confidence can be higher (0.5-0.9)
-- be honest about uncertainty
-- return ONLY the JSON object, no other text`,
+Return ONLY the JSON object. No prose, no markdown fences.`,
     });
 
-    const response = await api.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 500,
-      messages: [{ role: "user", content: contentParts }],
-    });
+    const response = await callWithRetry(
+      (signal) => api.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 600,
+        messages: [{ role: "user", content: contentParts }],
+      }, { signal }),
+      IDENTIFY_TIMEOUT_MS,
+    );
 
     const text = response.content[0]?.type === "text" ? response.content[0].text : "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
     const parsed = JSON.parse(jsonMatch[0]) as IdentificationOutput;
-    // Clamp confidence
     parsed.confidence = Math.max(0.1, Math.min(0.95, parsed.confidence));
+    if (!Array.isArray(parsed.clarifications)) parsed.clarifications = [];
+    if (typeof parsed.isSpecialty !== "boolean") parsed.isSpecialty = false;
+
+    // Post-parse defense: guard against forbidden/generic placeholder names.
+    // The prompt forbids these, but if the model still returns one, rewrite it
+    // into a low-confidence best-effort generic rather than polluting the
+    // downstream pricing pipeline with "Scanned Item" etc.
+    if (isGenericName(parsed.identifiedName)) {
+      console.warn(
+        `[Claude] generic identifiedName "${parsed.identifiedName}" returned despite prompt guardrails; rewriting to unidentified fallback. Blocklist: ${GENERIC_NAMES.join(", ")}`,
+      );
+      const categoryHint = parsed.identifiedCategory?.toLowerCase().trim() || "item";
+      parsed.identifiedName = `unidentified ${categoryHint}`;
+      parsed.confidence = Math.min(parsed.confidence, 0.3);
+    }
+
+    if (isGenericCategory(parsed.identifiedCategory)) {
+      console.warn(
+        `[Claude] generic identifiedCategory "${parsed.identifiedCategory}" returned; leaving as-is for downstream quality gating (Workstream C).`,
+      );
+    }
+
     return parsed;
   } catch (err) {
-    console.error("Claude identification failed:", err instanceof Error ? err.message : err);
+    console.error("[Claude] identification failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -139,13 +242,11 @@ export async function claudePricing(input: PricingInput): Promise<PricingOutput 
     const brandInfo = input.brand ? ` by ${input.brand}` : "";
     const modelInfo = input.model ? ` (model: ${input.model})` : "";
 
-    // Emphasize model-specific pricing when brand + model are available
     const modelEmphasis =
       input.brand && input.model
         ? `\nIMPORTANT: Price this specific model (${input.brand} ${input.model}), not the generic category. Use known market prices for this exact model.\nIf the item appears to include accessories, a bundle, or a full kit, note this in your reasoning. Price the specific configuration described, not just the base unit.`
         : "\nIf the item appears to include accessories, a bundle, or a full kit, note this in your reasoning. Price the specific configuration described, not just the base unit.";
 
-    // Build clarification context if answers were provided
     let clarificationContext = "";
     if (input.clarificationAnswers && Object.keys(input.clarificationAnswers).length > 0) {
       const answerLines = Object.entries(input.clarificationAnswers)
@@ -154,12 +255,13 @@ export async function claudePricing(input: PricingInput): Promise<PricingOutput 
       clarificationContext = `\nAdditional details provided by the seller:\n${answerLines}\n`;
     }
 
-    const response = await api.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 600,
-      messages: [{
-        role: "user",
-        content: `You are a pricing analyst for household items being sold during a military PCS move in the US.
+    const response = await callWithRetry(
+      (signal) => api.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 600,
+        messages: [{
+          role: "user",
+          content: `You are a pricing analyst for household items being sold during a military PCS move in the US.
 
 Item: ${input.itemName}${brandInfo}${modelInfo}
 Category: ${input.category}
@@ -183,8 +285,10 @@ Rules:
 - confidence should be lower for generic items, higher for well-known branded items
 - saleSpeedBand: FAST for items under $50, MODERATE for $50-300, SLOW for $300+
 - Return ONLY the JSON object`,
-      }],
-    });
+        }],
+      }, { signal }),
+      PRICING_TIMEOUT_MS,
+    );
 
     const text = response.content[0]?.type === "text" ? response.content[0].text : "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -192,15 +296,13 @@ Rules:
 
     const parsed = JSON.parse(jsonMatch[0]) as Omit<PricingOutput, "comparables"> & { comparables?: ComparableCandidate[] };
     parsed.confidence = Math.max(0.1, Math.min(0.95, parsed.confidence));
-    // Ensure prices are positive integers
     parsed.fastSale = Math.max(1, Math.round(parsed.fastSale));
     parsed.fairMarket = Math.max(1, Math.round(parsed.fairMarket));
     parsed.reach = Math.max(1, Math.round(parsed.reach));
-    // Claude must not generate fake comparable listings — comparables come from eBay only
     parsed.comparables = [];
     return parsed as PricingOutput;
   } catch (err) {
-    console.error("Claude pricing failed:", err instanceof Error ? err.message : err);
+    console.error("[Claude] pricing failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }

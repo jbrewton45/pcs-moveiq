@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import type { DecisionBucket, Item, ItemDecisionAction, PrioritizedItem, ScoreBreakdown } from "../types";
 import { api } from "../api";
+import { SoldPriceSheet } from "./ui/SoldPriceSheet";
+import { CompletionStats } from "./CompletionStats";
 
 // Long-press to enter selection mode: finger-down for this long without
 // moving more than DRAG_CANCEL_PX triggers multi-select.
@@ -87,9 +89,13 @@ export interface PriorityPanelProps {
   projectId: string;
   onSelectRoom?: (roomId: string) => void;
   onItemChanged?: () => void;
+  limit?: number;
+  heading?: string;
 }
 
-export function PriorityPanel({ projectId, onSelectRoom, onItemChanged }: PriorityPanelProps) {
+export function PriorityPanel({ projectId, onSelectRoom, onItemChanged, limit, heading }: PriorityPanelProps) {
+  const effectiveLimit = limit ?? TOP_N;
+  const effectiveHeading = heading ?? `Top ${effectiveLimit} items to sell this week`;
   const [loading, setLoading] = useState(true);
   const [priorities, setPriorities] = useState<PrioritizedItem[]>([]);
   const [itemsById, setItemsById] = useState<Record<string, Item>>({});
@@ -109,7 +115,7 @@ export function PriorityPanel({ projectId, onSelectRoom, onItemChanged }: Priori
     let cancelled = false;
     setLoading(true);
     Promise.all([
-      api.getPrioritizedItems(projectId).catch(() => [] as PrioritizedItem[]),
+      api.getPrioritizedItems(projectId, effectiveLimit).catch(() => [] as PrioritizedItem[]),
       api.listItems({ projectId }).catch(() => [] as Item[]),
     ])
       .then(([pList, items]) => {
@@ -119,7 +125,7 @@ export function PriorityPanel({ projectId, onSelectRoom, onItemChanged }: Priori
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [projectId, refreshTick]);
+  }, [projectId, refreshTick, effectiveLimit]);
 
   const applyAction = async (item: Item, action: ItemDecisionAction) => {
     try {
@@ -194,7 +200,7 @@ export function PriorityPanel({ projectId, onSelectRoom, onItemChanged }: Priori
 
   const rows = priorities
     .filter((p) => p.score > 0 && itemsById[p.itemId])
-    .slice(0, TOP_N);
+    .slice(0, effectiveLimit);
 
   if (rows.length === 0) return null;
 
@@ -210,7 +216,7 @@ export function PriorityPanel({ projectId, onSelectRoom, onItemChanged }: Priori
     >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
         <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "var(--text-primary)" }}>
-          🔥 Do This First
+          {effectiveHeading}
         </h3>
         <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
           {rows.length} item{rows.length === 1 ? "" : "s"}
@@ -221,6 +227,8 @@ export function PriorityPanel({ projectId, onSelectRoom, onItemChanged }: Priori
           ? "Tap items to select. Use the bar below to act on all of them."
           : "Tap an item to see how it was scored. Long-press to select multiple."}
       </p>
+
+      <CompletionStats items={Object.values(itemsById)} />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {rows.map((p) => {
@@ -287,120 +295,6 @@ export function PriorityPanel({ projectId, onSelectRoom, onItemChanged }: Priori
         />
       )}
     </section>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-//  Sold-price sheet — optional price prompt on "Mark as sold"
-// ────────────────────────────────────────────────────────────────────────────
-
-function SoldPriceSheet({
-  item, onClose, onMarkSold,
-}: {
-  item: Item;
-  onClose: () => void;
-  onMarkSold: (soldPriceUsd?: number) => Promise<void> | void;
-}) {
-  const listedPrice = item.priceFairMarket ?? item.priceFastSale ?? 0;
-  const initialInput = listedPrice > 0 ? Math.round(listedPrice).toString() : "";
-  const [priceInput, setPriceInput] = useState(initialInput);
-  const [busy, setBusy] = useState(false);
-
-  const parsedPrice = (() => {
-    const n = Number(priceInput);
-    return Number.isFinite(n) && n >= 0 ? n : undefined;
-  })();
-
-  const headline = listedPrice > 0
-    ? `You listed this at $${Math.round(listedPrice)} — what did it sell for?`
-    : "What did it sell for?";
-
-  const handleSave = async () => {
-    setBusy(true);
-    try { await onMarkSold(parsedPrice); } finally { setBusy(false); }
-  };
-  const handleSkip = async () => {
-    setBusy(true);
-    try { await onMarkSold(undefined); } finally { setBusy(false); }
-  };
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 10003,
-        display: "flex", alignItems: "flex-end", justifyContent: "center",
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: "100%", maxWidth: 520, background: "var(--bg-card, #fff)",
-          borderTopLeftRadius: 16, borderTopRightRadius: 16,
-          padding: "20px 16px 24px",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.3 }}>
-            {headline}
-          </h3>
-          <button onClick={onClose} aria-label="Close"
-            style={{ border: "none", background: "transparent", fontSize: 24, cursor: "pointer", color: "var(--text-secondary)", lineHeight: 1 }}>×</button>
-        </div>
-        <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-secondary)" }}>
-          Entering the price is optional — it helps track revenue and will tune future recommendations.
-        </p>
-
-        <label style={{ display: "block", marginBottom: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>
-            Sold price (USD)
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 18, fontWeight: 700, color: "var(--text-muted)" }}>$</span>
-            <input
-              autoFocus
-              value={priceInput}
-              inputMode="decimal"
-              pattern="[0-9]*\\.?[0-9]*"
-              onChange={(e) => setPriceInput(e.target.value.replace(/[^\d.]/g, ""))}
-              placeholder="0"
-              style={{ flex: 1, padding: "10px 12px", border: "1px solid var(--border-soft)", borderRadius: 8, fontSize: 16, fontWeight: 600 }}
-            />
-          </div>
-        </label>
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={handleSkip}
-            disabled={busy}
-            style={{
-              flex: 1, padding: "12px 14px",
-              border: "1px solid var(--border-soft)", borderRadius: 8,
-              background: "var(--bg-elevated, #f8fafc)",
-              fontSize: 14, fontWeight: 600, cursor: busy ? "default" : "pointer",
-              color: "var(--text-secondary)",
-              opacity: busy ? 0.6 : 1,
-            }}
-          >
-            Skip — just mark sold
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={busy || parsedPrice === undefined}
-            style={{
-              flex: 1, padding: "12px 14px",
-              border: "none", borderRadius: 8,
-              background: "#22c55e", color: "#fff",
-              fontSize: 14, fontWeight: 700,
-              cursor: (busy || parsedPrice === undefined) ? "default" : "pointer",
-              opacity: (busy || parsedPrice === undefined) ? 0.5 : 1,
-            }}
-          >
-            {busy ? "Saving…" : parsedPrice !== undefined ? `Save $${parsedPrice}` : "Save"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 

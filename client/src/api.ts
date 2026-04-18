@@ -1,4 +1,4 @@
-import type { Project, Room, Item, Comparable, ProjectWorkspace, UserPublic, EbayAnalysisResult, SellPriorityResult, RoomScanData, RoomScan, ItemPlacementInput, OrphanedItem, PrioritizedItem, ItemDecisionAction, CategoryCalibration } from "./types";
+import type { Project, Room, Item, Comparable, ProjectWorkspace, UserPublic, EbayAnalysisResult, SellPriorityResult, RoomScanData, RoomScan, ItemPlacementInput, OrphanedItem, PrioritizedItem, ItemDecisionAction, CategoryCalibration, EbaySoldResult, ItemDecisionResult } from "./types";
 import { Capacitor } from "@capacitor/core";
 
 const configuredApiOrigin = (import.meta.env.VITE_API_ORIGIN as string | undefined)?.trim();
@@ -38,37 +38,87 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
+const REQUEST_TIMEOUT_MS = 30_000;
+const MAX_RETRIES = 1;
+const RETRY_DELAY_MS = 1_500;
+
+function isRetryableNetworkError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return msg.includes("load failed") ||
+    msg.includes("network") ||
+    msg.includes("failed to fetch") ||
+    msg.includes("aborted") ||
+    err.name === "AbortError" ||
+    err.name === "TypeError";
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${BASE}${path}`;
   const method = options?.method ?? "GET";
-  const bodyPreview = typeof options?.body === "string" ? options.body : options?.body ? "[binary body]" : undefined;
-  console.log(`[api] → ${method} ${url}`, bodyPreview ? { body: bodyPreview } : "");
+  console.log(`[api] → ${method} ${url}`);
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      headers: authHeaders(),
-      ...options,
-    });
-  } catch (err) {
-    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-    console.error(`[api] ✗ NETWORK FAIL ${method} ${url} — ${detail}`);
-    throw new Error(`Network request failed: ${detail} (url=${url})`);
+  let lastErr: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.log(`[api] ↻ retry ${attempt}/${MAX_RETRIES} ${method} ${url}`);
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+      const res = await fetch(url, {
+        headers: authHeaders(),
+        ...options,
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      console.log(`[api] ← ${res.status} ${res.statusText} ${url}`);
+
+      if (res.status === 401) {
+        setToken(null);
+        window.dispatchEvent(new Event("moveiq:logout"));
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        const msg = (body as Record<string, unknown>).error as string ?? `${res.status} ${res.statusText}`;
+        console.error(`[api] ✗ ${method} ${url} → ${msg}`);
+        throw new Error(msg);
+      }
+      return res.json() as Promise<T>;
+    } catch (err) {
+      clearTimeout(timer);
+      lastErr = err instanceof Error ? err : new Error(String(err));
+
+      if (controller.signal.aborted && lastErr.name !== "AbortError") {
+        lastErr = new Error("Request timed out");
+      }
+
+      // Only retry on transient network errors, not HTTP errors (4xx/5xx already throw above)
+      if (attempt < MAX_RETRIES && isRetryableNetworkError(err)) {
+        console.warn(`[api] ⚠ transient failure ${method} ${url}: ${lastErr.message}`);
+        continue;
+      }
+
+      // Classify the error for the user
+      const detail = lastErr.message;
+      if (lastErr.name === "AbortError" || detail.includes("timed out")) {
+        console.error(`[api] ✗ TIMEOUT ${method} ${url}`);
+        throw new Error("Request timed out. Check your connection and try again.");
+      }
+      if (detail.includes("Load failed") || detail.includes("Failed to fetch") || detail.includes("network")) {
+        console.error(`[api] ✗ NETWORK ${method} ${url} — ${detail}`);
+        throw new Error("Unable to reach the server. Check your internet connection.");
+      }
+      throw lastErr;
+    }
   }
 
-  console.log(`[api] ← ${res.status} ${res.statusText} ${url}`);
-
-  if (res.status === 401) {
-    setToken(null);
-    window.dispatchEvent(new Event("moveiq:logout"));
-  }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const msg = (body as Record<string, unknown>).error as string ?? `${res.status} ${res.statusText}`;
-    console.error(`[api] ✗ ${method} ${url} → ${msg}`);
-    throw new Error(msg);
-  }
-  return res.json() as Promise<T>;
+  throw lastErr ?? new Error("Request failed");
 }
 
 export const api = {
@@ -178,8 +228,11 @@ export const api = {
       body: JSON.stringify(patch),
     }),
 
-  getPrioritizedItems: (projectId: string) =>
-    request<PrioritizedItem[]>(`/items/prioritized?projectId=${encodeURIComponent(projectId)}`),
+  getPrioritizedItems: (projectId: string, limit?: number) => {
+    const qs = new URLSearchParams({ projectId });
+    if (limit != null) qs.set("limit", String(limit));
+    return request<PrioritizedItem[]>(`/items/prioritized?${qs.toString()}`);
+  },
 
   applyItemAction: (
     itemId: string,
@@ -192,6 +245,20 @@ export const api = {
         opts.soldPriceUsd !== undefined
           ? { action, soldPriceUsd: opts.soldPriceUsd }
           : { action }
+      ),
+    }),
+
+  markItemAction: (
+    itemId: string,
+    action: "sold" | "donate" | "discarded" | "shipped",
+    opts: { finalPrice?: number } = {},
+  ) =>
+    request<Item>(`/items/${itemId}/action`, {
+      method: "POST",
+      body: JSON.stringify(
+        action === "sold" && opts.finalPrice !== undefined
+          ? { action, soldPriceUsd: opts.finalPrice }
+          : { action },
       ),
     }),
 
@@ -274,10 +341,36 @@ export const api = {
       body: edits ? JSON.stringify(edits) : "{}",
     }),
 
+  correctAndReprice: (
+    id: string,
+    edits: {
+      identifiedName: string;
+      identifiedCategory: string;
+      identifiedBrand?: string | null;
+      identifiedModel?: string | null;
+    },
+  ) => request<{ item: Item; comparables: Comparable[] }>(
+    `/items/${id}/correct-and-reprice`,
+    { method: "POST", body: JSON.stringify(edits) },
+  ),
+
   getItemPricing: (id: string) =>
     request<{ item: Item; comparables: Comparable[] }>(`/items/${id}/pricing`, { method: "POST" }),
 
   getComparables: (id: string) => request<Comparable[]>(`/items/${id}/comparables`),
+
+  getEbaySoldListings: (query: string, condition?: string) =>
+    request<EbaySoldResult>(`/ebay/search/sold?q=${encodeURIComponent(query)}${condition ? `&condition=${encodeURIComponent(condition)}` : ""}`),
+
+  getItemDecision: (input: {
+    itemName: string; category: string; condition: string; sizeClass: string;
+    weightLbs?: number; priceFairMarket?: number; priceFastSale?: number;
+    ebayAvgPrice?: number; ebayMedianPrice?: number; ebayLowPrice?: number;
+    ebayHighPrice?: number; ebayListingCount?: number; pcsDate?: string;
+    keepFlag?: boolean; sentimentalFlag?: boolean; willingToSell?: boolean;
+  }) => request<ItemDecisionResult>("/pricing/decision", {
+    method: "POST", body: JSON.stringify(input),
+  }),
 
   getProviderStatus: () => request<ProviderStatus>("/providers/status"),
 

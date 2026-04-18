@@ -1,10 +1,10 @@
 import OpenAI from "openai";
-import fs from "fs";
+import fs from "fs/promises";
 import path from "path";
 import type { ComparableCandidate, ComparableLookupInput } from "../types/providers.js";
 import type { ClarificationQuestion } from "../types/domain.js";
-
-const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+import { getUploadsDir } from "../data/storage.js";
+import { GENERIC_NAMES, isGenericName, isGenericCategory } from "../utils/identification-quality.js";
 
 let client: OpenAI | null = null;
 
@@ -62,20 +62,54 @@ export interface PricingOutput {
   comparables: ComparableCandidate[];
 }
 
+const IDENTIFY_TIMEOUT_MS = 30_000;
+const PRICING_TIMEOUT_MS = 20_000;
+const RETRY_DELAY_MS = 2_000;
+
+function isRetryable(err: unknown): boolean {
+  if (err instanceof OpenAI.RateLimitError) return true;
+  if (err instanceof OpenAI.InternalServerError) return true;
+  if (err instanceof OpenAI.APIConnectionError) return true;
+  if (err instanceof Error && err.name === "AbortError") return true;
+  return false;
+}
+
+async function callWithRetry<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const result = await fn(controller.signal);
+      return result;
+    } catch (err) {
+      if (attempt === 0 && isRetryable(err)) {
+        console.warn(`[OpenAI] retryable error (attempt 1), retrying in ${RETRY_DELAY_MS}ms:`, err instanceof Error ? err.message : err);
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error("unreachable");
+}
+
 export async function openaiIdentify(input: IdentificationInput): Promise<IdentificationOutput | null> {
   const api = getClient();
   if (!api) return null;
 
   try {
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
-
-    // Build user message content — support vision if photo provided
     const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [];
 
     if (input.photoPath) {
-      const filePath = path.join(UPLOADS_DIR, input.photoPath);
-      if (fs.existsSync(filePath)) {
-        const imageData = fs.readFileSync(filePath);
+      const filePath = path.join(getUploadsDir(), input.photoPath);
+      try {
+        const imageData = await fs.readFile(filePath);
         const base64 = imageData.toString("base64");
         const ext = path.extname(input.photoPath).toLowerCase();
         const mimeType = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
@@ -86,6 +120,8 @@ export async function openaiIdentify(input: IdentificationInput): Promise<Identi
             detail: "low",
           },
         });
+      } catch {
+        console.warn(`[OpenAI] photo not found: ${filePath}, proceeding text-only`);
       }
     }
 
@@ -93,7 +129,7 @@ export async function openaiIdentify(input: IdentificationInput): Promise<Identi
       type: "text",
       text: `You are helping identify a household item for a military PCS (Permanent Change of Station) move.
 
-Current item details:
+Seller-provided context (MAY BE PLACEHOLDERS):
 - Name: ${input.itemName}
 - Category: ${input.category}
 - Condition: ${input.condition}
@@ -101,18 +137,43 @@ Current item details:
 ${input.notes ? `- Notes: ${input.notes}` : ""}
 ${input.photoPath ? "A photo of the item is attached." : "No photo is available."}
 
-Please identify this item as precisely as possible.
+IMPORTANT: The "Name" and "Category" above may be auto-generated placeholders from a room scan (for example, "Scanned Item" or "Uncategorized"). IGNORE those placeholder values entirely and identify the item from the photo and notes. Do not echo the placeholder back as your answer.
+
+IDENTIFICATION REQUIREMENTS
+
+identifiedName: Describe what the item actually is, using the item type plus at least one distinguishing attribute (brand, material, color, form factor, or use). Good examples:
+- "Ryobi 18V cordless fan"
+- "KitchenAid stand mixer"
+- "IKEA Malm 6-drawer dresser"
+- "Sony A7R III mirrorless camera body"
+When brand is not visible, a generic-but-specific type is acceptable:
+- "cordless drill"
+- "upholstered loveseat"
+- "gas-powered leaf blower"
+
+FORBIDDEN identifiedName values (case-insensitive, never return any of these): "Scanned Item", "Item", "Unknown Item", "Uncategorized", "Object", "Misc", "Household Item". If you truly cannot tell what the item is, return a best-effort generic type like "unidentified small appliance", "unidentified piece of furniture", or "unidentified kitchen tool" with a LOW confidence value (around 0.2). NEVER return a placeholder name.
+
+identifiedCategory: Must be exactly one of this fixed list (pick the best fit):
+Furniture, Electronics, Appliance, Kitchen, Tools, Sporting Goods, Outdoor, Toys, Clothing, Decor, Media, Linens, Baby, Pet, Office, Other.
+Do NOT return "Uncategorized".
+
+identifiedBrand / identifiedModel: Fill ONLY if you can actually read the brand or model on the item (logo, nameplate, sticker, product casing). If not visible, return null. Do NOT guess a brand or model from appearance alone.
+
+Confidence bands (be honest):
+- >= 0.75 (STRONG): Clear photo AND either brand/model is visible on the item OR the item is universally recognizable (e.g., a standard IKEA bookshelf, a well-known gaming console).
+- 0.50 - 0.75 (MEDIUM): Confident on type and category, but brand/model uncertain, or the photo shows only part of the item.
+- < 0.50 (WEAK): No photo, blurry photo, or only a generic guess possible. Use ~0.2 for an "unidentified <type>" fallback.
 
 Specialty/high-value item detection: cameras (DSLRs, mirrorless), musical instruments (guitars, keyboards, violins), collectibles (trading cards, coins, art), power tools (drills, saws, compressors), designer items (handbags, watches), gaming consoles, premium appliances (KitchenAid, Vitamix, Dyson), premium exercise equipment (Peloton, NordicTrack) should all have isSpecialty: true.
 
 Clarification questions: Generate 1-3 questions ONLY when a missing fact would materially change pricing by more than 20%. For example: asking if a camera lens is included, or if there is major cosmetic damage. Do NOT ask clarifying questions for common household items where condition already covers the key pricing factors.
 
-Return a JSON object with these exact fields:
+Return a JSON object with these exact fields and no other text:
 {
-  "identifiedName": "specific name of the item",
-  "identifiedCategory": "refined category",
-  "identifiedBrand": "brand if identifiable, or null",
-  "identifiedModel": "model if identifiable, or null",
+  "identifiedName": "specific name of the item (never a forbidden placeholder)",
+  "identifiedCategory": "one of: Furniture, Electronics, Appliance, Kitchen, Tools, Sporting Goods, Outdoor, Toys, Clothing, Decor, Media, Linens, Baby, Pet, Office, Other",
+  "identifiedBrand": "brand only if visibly readable on the item, else null",
+  "identifiedModel": "model only if visibly readable on the item, else null",
   "confidence": 0.0 to 1.0,
   "reasoning": "brief explanation of your identification",
   "isSpecialty": true or false,
@@ -126,40 +187,51 @@ Return a JSON object with these exact fields:
   ]
 }
 
-Rules:
-- confidence should reflect how certain you are
-- if no photo, confidence should generally be lower (0.3-0.6)
-- with a clear photo, confidence can be higher (0.5-0.9)
-- be honest about uncertainty
-- clarifications array should be empty [] when no questions are needed
-- return ONLY the JSON object, no other text`,
+Return ONLY the JSON object. No prose, no markdown fences.`,
     });
 
     messages.push({ role: "user", content: contentParts });
 
-    const response = await api.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 600,
-      messages,
-    });
+    const response = await callWithRetry(
+      (signal) => api.chat.completions.create({
+        model: "gpt-4o",
+        max_tokens: 600,
+        messages,
+      }, { signal }),
+      IDENTIFY_TIMEOUT_MS,
+    );
 
     const text = response.choices[0]?.message?.content ?? "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
     const parsed = JSON.parse(jsonMatch[0]) as IdentificationOutput;
-
-    // Clamp confidence
     parsed.confidence = Math.max(0.1, Math.min(0.95, parsed.confidence));
+    if (!Array.isArray(parsed.clarifications)) parsed.clarifications = [];
+    if (typeof parsed.isSpecialty !== "boolean") parsed.isSpecialty = false;
 
-    // Normalize clarifications — ensure it's an array
-    if (!Array.isArray(parsed.clarifications)) {
-      parsed.clarifications = [];
+    // Post-parse defense: guard against forbidden/generic placeholder names.
+    // The prompt forbids these, but if the model still returns one, rewrite it
+    // into a low-confidence best-effort generic rather than polluting the
+    // downstream pricing pipeline with "Scanned Item" etc.
+    if (isGenericName(parsed.identifiedName)) {
+      console.warn(
+        `[OpenAI] generic identifiedName "${parsed.identifiedName}" returned despite prompt guardrails; rewriting to unidentified fallback. Blocklist: ${GENERIC_NAMES.join(", ")}`,
+      );
+      const categoryHint = parsed.identifiedCategory?.toLowerCase().trim() || "item";
+      parsed.identifiedName = `unidentified ${categoryHint}`;
+      parsed.confidence = Math.min(parsed.confidence, 0.3);
+    }
+
+    if (isGenericCategory(parsed.identifiedCategory)) {
+      console.warn(
+        `[OpenAI] generic identifiedCategory "${parsed.identifiedCategory}" returned; leaving as-is for downstream quality gating (Workstream C).`,
+      );
     }
 
     return parsed;
   } catch (err) {
-    console.error("OpenAI identification failed:", err instanceof Error ? err.message : err);
+    console.error("[OpenAI] identification failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -172,7 +244,6 @@ export async function openaiPricing(input: PricingInput): Promise<PricingOutput 
     const brandInfo = input.brand ? ` by ${input.brand}` : "";
     const modelInfo = input.model ? ` (model: ${input.model})` : "";
 
-    // Build clarification context if answers were provided
     let clarificationContext = "";
     if (input.clarificationAnswers && Object.keys(input.clarificationAnswers).length > 0) {
       const answerLines = Object.entries(input.clarificationAnswers)
@@ -181,17 +252,16 @@ export async function openaiPricing(input: PricingInput): Promise<PricingOutput 
       clarificationContext = `\nAdditional details provided by the seller:\n${answerLines}\n`;
     }
 
-    // Emphasize model-specific pricing when brand + model are available
     const modelEmphasis =
       input.brand && input.model
         ? `\nIMPORTANT: Price this specific model (${input.brand} ${input.model}), not the generic category. Use known market prices for this exact model.\nIf the item appears to include accessories, a bundle, or a full kit, note this in your reasoning. Price the specific configuration described, not just the base unit.`
         : "\nIf the item appears to include accessories, a bundle, or a full kit, note this in your reasoning. Price the specific configuration described, not just the base unit.";
 
-    const response = await api.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 600,
-      messages: [
-        {
+    const response = await callWithRetry(
+      (signal) => api.chat.completions.create({
+        model: "gpt-4o",
+        max_tokens: 600,
+        messages: [{
           role: "user",
           content: `You are a pricing analyst for household items being sold during a military PCS move in the US.
 
@@ -217,38 +287,28 @@ Rules:
 - confidence should be lower for generic items, higher for well-known branded items
 - saleSpeedBand: FAST for items under $50, MODERATE for $50-300, SLOW for $300+
 - Return ONLY the JSON object`,
-        },
-      ],
-    });
+        }],
+      }, { signal }),
+      PRICING_TIMEOUT_MS,
+    );
 
     const text = response.choices[0]?.message?.content ?? "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
     const parsed = JSON.parse(jsonMatch[0]) as Omit<PricingOutput, "comparables"> & { comparables?: ComparableCandidate[] };
-
-    // Clamp confidence
     parsed.confidence = Math.max(0.1, Math.min(0.95, parsed.confidence));
-
-    // Ensure prices are positive integers
     parsed.fastSale = Math.max(1, Math.round(parsed.fastSale));
     parsed.fairMarket = Math.max(1, Math.round(parsed.fairMarket));
     parsed.reach = Math.max(1, Math.round(parsed.reach));
-
-    // OpenAI must not generate fake comparable listings — comparables come from eBay only
     parsed.comparables = [];
-
     return parsed as PricingOutput;
   } catch (err) {
-    console.error("OpenAI pricing failed:", err instanceof Error ? err.message : err);
+    console.error("[OpenAI] pricing failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }
 
-/**
- * Use OpenAI Responses API with web_search_preview to find real
- * comparable listings for an item on the used market.
- */
 export async function openaiWebSearchComparables(
   input: ComparableLookupInput,
 ): Promise<ComparableCandidate[] | null> {
@@ -288,7 +348,6 @@ Rules:
 - Return ONLY the JSON array, nothing else`,
     });
 
-    // Extract text from the response
     let text = "";
     for (const item of response.output) {
       if (item.type === "message") {
@@ -302,7 +361,6 @@ Rules:
 
     if (!text) return null;
 
-    // Parse JSON array from response
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return null;
 
@@ -315,12 +373,10 @@ Rules:
 
     if (!Array.isArray(parsed)) return null;
 
-    // Filter and normalize results
     const results: ComparableCandidate[] = [];
     for (const item of parsed) {
       const price = typeof item.price === "number" ? item.price : parseFloat(String(item.price));
       if (!item.title || isNaN(price) || price <= 0) continue;
-      // Only include items with real URLs
       if (!item.url || !item.url.startsWith("http")) continue;
       results.push({
         title: item.title,
@@ -333,7 +389,7 @@ Rules:
 
     return results.length > 0 ? results : null;
   } catch (err) {
-    console.error("OpenAI web search failed:", err instanceof Error ? err.message : err);
+    console.error("[OpenAI] web search failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }

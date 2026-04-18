@@ -4,6 +4,8 @@ export type ConfigTier = "base" | "base_plus" | "bundle" | "full_kit";
 
 export type IdentificationStatus = "NONE" | "SUGGESTED" | "CONFIRMED" | "EDITED";
 
+export type IdentificationQuality = "STRONG" | "MEDIUM" | "WEAK";
+
 export type HousingAssumption = "SMALLER" | "SAME" | "LARGER" | "UNKNOWN";
 
 export type UserGoal =
@@ -216,6 +218,8 @@ export interface Item {
   identificationConfidence?: number;
   identificationReasoning?: string;
   identificationStatus: IdentificationStatus;
+  identificationQuality?: IdentificationQuality;
+  pricingEligible?: boolean;
   priceFastSale?: number;
   priceFairMarket?: number;
   priceReach?: number;
@@ -235,6 +239,8 @@ export interface Item {
   listingUrl?: string;
   // Phase 11: realized sell price in USD (set when the item is marked sold)
   soldPriceUsd?: number;
+  // Workstream F: ISO timestamp when item reached a terminal status
+  completedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

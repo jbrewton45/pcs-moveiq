@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import type { Request, Response } from "express";
 import type { Item, ItemStatus } from "../types/domain.js";
-import { bulkDeleteItems, bulkUpdateStatus, createItem, deleteItem, listItemsByProject, listItemsByRoom, updateItem, updateItemPlacement, updateItemListing, updateItemSoldPrice, applyItemAction, applyBulkItemAction, PlacementValidationError, submitClarifications } from "../services/items.service.js";
+import { bulkDeleteItems, bulkUpdateStatus, createItem, deleteItem, getItemById, listItemsByProject, listItemsByRoom, updateItem, updateItemPlacement, updateItemListing, updateItemSoldPrice, applyItemAction, applyBulkItemAction, PlacementValidationError, submitClarifications, ItemActionConflictError, isItemCompleted } from "../services/items.service.js";
 import { getProjectById } from "../services/projects.service.js";
 import { getRoomById } from "../services/rooms.service.js";
 import { prioritizeProject } from "../services/decisions.service.js";
@@ -17,7 +17,12 @@ export async function getPrioritizedHandler(req: Request, res: Response) {
   const projectId = req.query.projectId as string | undefined;
   if (!projectId) return res.status(400).json({ error: "projectId is required" });
   if (!(await getProjectById(projectId))) return res.status(404).json({ error: "Project not found" });
-  return res.status(200).json(await prioritizeProject(projectId));
+  const limitRaw = req.query.limit as string | undefined;
+  const limit = limitRaw != null ? Number.parseInt(limitRaw, 10) : undefined;
+  if (limit != null && (!Number.isFinite(limit) || limit < 1 || limit > 100)) {
+    return res.status(400).json({ error: "limit must be an integer in [1, 100]" });
+  }
+  return res.status(200).json(await prioritizeProject(projectId, { limit }));
 }
 
 export async function getItems(req: Request, res: Response) {
@@ -71,9 +76,20 @@ export async function postItemActionHandler(req: Request, res: Response) {
   if (!parsed.success) {
     return res.status(400).json({ error: "Validation failed", details: parsed.error.issues });
   }
-  const updated = await applyItemAction(id, parsed.data.action, { soldPriceUsd: parsed.data.soldPriceUsd });
-  if (!updated) return res.status(404).json({ error: "Item not found" });
-  return res.status(200).json(updated);
+  try {
+    const result = await applyItemAction(id, parsed.data.action, { soldPriceUsd: parsed.data.soldPriceUsd });
+    if (!result) return res.status(404).json({ error: "Item not found" });
+    return res.status(200).json(result.item);
+  } catch (err) {
+    if (err instanceof ItemActionConflictError) {
+      return res.status(409).json({
+        error: err.message,
+        existingStatus: err.existingStatus,
+        existingSoldPriceUsd: err.existingSoldPriceUsd,
+      });
+    }
+    throw err;
+  }
 }
 
 export async function postBulkItemActionHandler(req: Request, res: Response) {
@@ -202,19 +218,27 @@ export async function batchIdentifyPrice(req: Request, res: Response) {
 
   const results: Array<{
     itemId: string;
-    status: "complete" | "no_estimate" | "error";
+    status: "complete" | "no_estimate" | "error" | "skipped_completed";
     item?: Item;
   }> = [];
 
   for (const id of ids) {
     try {
-      const identified = await identifyItem(id);
-      if (!identified) {
+      // Skip items that are already in a terminal state — they are done and
+      // should not have identification or pricing re-run on them.
+      const existingItem = await getItemById(id);
+      if (existingItem && isItemCompleted(existingItem.status)) {
+        results.push({ itemId: id, status: "skipped_completed", item: existingItem });
+        continue;
+      }
+
+      const identResult = await identifyItem(id);
+      if (!identResult) {
         results.push({ itemId: id, status: "error" });
         continue;
       }
 
-      if (identified.identificationStatus === "NONE") {
+      if (identResult.item.identificationStatus === "NONE") {
         await identifyItem(id);
       }
 

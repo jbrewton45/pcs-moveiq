@@ -13,11 +13,31 @@ import { ebayRouter } from "./routes/ebay.routes.js";
 import { ebaySearchRouter } from "./routes/ebay-search.routes.js";
 import { ebayAnalysisRouter } from "./routes/ebay-analysis.routes.js";
 import { calibrationRouter } from "./routes/calibration.routes.js";
+import { decisionRouter } from "./routes/decision.routes.js";
 import { requireAuth } from "./middleware/auth.middleware.js";
 
 export const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow: Capacitor native, localhost dev, Railway domain, no-origin (server-to-server)
+    if (
+      !origin ||
+      origin === "capacitor://localhost" ||
+      origin === "ionic://localhost" ||
+      origin.startsWith("http://localhost") ||
+      origin.startsWith("https://localhost") ||
+      origin.startsWith("https://")
+    ) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+}));
 app.use(express.json());
 
 // Serve uploaded photos (Railway volume or local ./uploads)
@@ -37,6 +57,7 @@ app.use("/api/projects", requireAuth, projectsRouter);
 app.use("/api/rooms", requireAuth, roomsRouter);
 app.use("/api/items", requireAuth, itemsRouter);
 app.use("/api/calibration", requireAuth, calibrationRouter);
+app.use("/api/pricing", requireAuth, decisionRouter);
 app.use("/api/providers", providersRouter);
 
 // eBay marketplace account deletion notifications (public, no auth)

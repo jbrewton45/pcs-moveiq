@@ -14,6 +14,8 @@ export type MoveType = "CONUS" | "OCONUS" | "JAPAN" | "EUROPE" | "STORAGE_ONLY";
 
 export type IdentificationStatus = "NONE" | "SUGGESTED" | "CONFIRMED" | "EDITED";
 
+export type IdentificationQuality = "STRONG" | "MEDIUM" | "WEAK";
+
 export type ComparableSource = "claude" | "openai" | "ebay" | "web" | "mock";
 
 export interface Comparable {
@@ -218,6 +220,8 @@ export interface Item {
   identificationConfidence?: number;
   identificationReasoning?: string;
   identificationStatus: IdentificationStatus;
+  identificationQuality?: IdentificationQuality;
+  pricingEligible?: boolean;
   priceFastSale?: number;
   priceFairMarket?: number;
   priceReach?: number;
@@ -237,6 +241,8 @@ export interface Item {
   listingUrl?: string;
   // Phase 11: realized sell price in USD (set when item marked sold)
   soldPriceUsd?: number;
+  // Phase H: timestamp set when item transitions to a completed status
+  completedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -256,7 +262,13 @@ export interface OrphanedItem {
 }
 
 export type DecisionBucket = "sell" | "keep" | "ship" | "donate";
-export type ItemDecisionAction = DecisionBucket | "sold";
+export type ItemDecisionAction = DecisionBucket | "sold" | "discarded" | "shipped";
+
+const COMPLETED_STATUSES = ["SOLD", "DONATED", "SHIPPED", "DISCARDED"] as const;
+export type CompletedStatus = (typeof COMPLETED_STATUSES)[number];
+export function isCompleted(item: Pick<Item, "status">): boolean {
+  return (COMPLETED_STATUSES as readonly string[]).includes(item.status);
+}
 
 /** Raw pre-multiplier band contributions from the decision service. */
 export interface ScoreBreakdown {
@@ -388,4 +400,49 @@ export interface ProjectWorkspace {
     itemsWithWeight: number;
     itemsWithoutWeight: number;
   };
+}
+
+// ── eBay sold listings ──────────────────────────────────────────────────────
+
+export interface EbaySoldListing {
+  title: string;
+  price: number;
+  currency: string;
+  url: string;
+  condition?: string;
+  soldDate?: string;
+}
+
+export interface EbaySoldResult {
+  query: string;
+  totalFound: number;
+  avgPrice: number;
+  medianPrice: number;
+  lowPrice: number;
+  highPrice: number;
+  sampleListings: EbaySoldListing[];
+}
+
+// ── Decision engine ─────────────────────────────────────────────────────────
+
+export type RecommendedAction = "SELL_NOW" | "SELL_LATER" | "SHIP" | "STORE" | "DONATE" | "DISCARD";
+export type ConfidenceLevel = "LOW" | "MEDIUM" | "HIGH";
+
+export interface DecisionBreakdown {
+  valueScore: number;
+  sizeScore: number;
+  urgencyScore: number;
+  conditionScore: number;
+  demandScore: number;
+  confidenceMultiplier: number;
+}
+
+export interface ItemDecisionResult {
+  urgencyScore: number;
+  recommendedAction: RecommendedAction;
+  recommendedPlatform: string | null;
+  rationale: string;
+  breakdown: DecisionBreakdown;
+  pricingConfidence: number;
+  confidenceLevel: ConfidenceLevel;
 }

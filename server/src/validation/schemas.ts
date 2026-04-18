@@ -71,14 +71,14 @@ export const UpdateRoomSchema = z.object({
 // ── Decision action ─────────────────────────────────────────────────────────
 
 export const ItemActionSchema = z.object({
-  action: z.enum(["sell", "keep", "ship", "donate", "sold"]),
+  action: z.enum(["sell", "keep", "ship", "donate", "sold", "discarded", "shipped"]),
   /** Only meaningful when action === "sold"; ignored otherwise. Optional. */
   soldPriceUsd: z.number().nonnegative().max(1_000_000).optional(),
 });
 
 export const BulkItemActionSchema = z.object({
   itemIds: z.array(z.string().min(1)).min(1),
-  action: z.enum(["sell", "keep", "ship", "donate", "sold"]),
+  action: z.enum(["sell", "keep", "ship", "donate", "sold", "discarded", "shipped"]),
 });
 
 export const UpdateItemListingSchema = z.object({

@@ -4,7 +4,7 @@ import { Capacitor } from "@capacitor/core";
 import type { Project, Room, RoomScanData } from "../types";
 import { api } from "../api";
 import { RoomScanPlugin, sqMToSqFt, mToFtIn } from "../plugins/RoomScanPlugin";
-import { saveScan, getScan } from "../plugins/scanStore";
+import { saveSynced, saveUnsynced, getScanData, hasUnsyncedScan, clearIfSynced } from "../plugins/scanStore";
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Constants & helpers
@@ -294,11 +294,33 @@ export function FloorplanView() {
     async function loadRooms() {
       try {
         const rawRooms = await api.listRooms(selectedProject!.id);
-        // Enrich each room with any locally cached scan data
-        const enriched: RoomWithScan[] = rawRooms.map(room => ({
-          ...room,
-          scanData: getScan(room.id),
-        }));
+        const enriched: RoomWithScan[] = await Promise.all(
+          rawRooms.map(async (room) => {
+            // Server is source of truth. localStorage is offline fallback only.
+            // Unsynced local scans (offline writes) are NEVER overwritten.
+            try {
+              const serverScan = await api.getRoomScan(room.id);
+              if (serverScan) {
+                if (hasUnsyncedScan(room.id)) {
+                  // Local scan was captured offline and not yet pushed. Keep it.
+                  console.log(`[scanStore] KEPT unsynced ${room.id} — server has older scan, local has unsynced`);
+                  return { ...room, scanData: getScanData(room.id) };
+                }
+                console.log(`[scanStore] loaded server ${room.id}`);
+                saveSynced(room.id, serverScan);
+                return { ...room, scanData: serverScan };
+              }
+              // Server explicitly says no scan (404 converted to null by api.getRoomScan).
+              clearIfSynced(room.id);
+              return { ...room, scanData: getScanData(room.id) };
+            } catch {
+              // Server unreachable — use local cache if available.
+              const local = getScanData(room.id);
+              if (local) console.log(`[scanStore] offline fallback ${room.id}`);
+              return { ...room, scanData: local };
+            }
+          })
+        );
         if (!cancelled) setRooms(enriched);
       } catch {
         if (!cancelled) setRooms([]);
@@ -341,24 +363,22 @@ export function FloorplanView() {
         `[Floorplan] Scan payload ready — ${payloadBytes} bytes, walls=${scanData.wallCount}, openings=${scanData.openings?.length ?? 0}, objects=${scanData.objects?.length ?? 0}`
       );
 
-      // Persist to server (source of truth). Fall back to localStorage if the
-      // write fails so the scan isn't lost — the next scan or GET refill will
-      // reconcile.
+      // Persist to server first (source of truth). Only update UI state
+      // AFTER the PUT resolves to prevent the race condition where navigating
+      // away during an in-flight PUT shows stale data on return.
+      let finalScanData: RoomScanData = scanData;
       try {
         const persisted = await api.putRoomScan(room.id, scanData);
-        console.log(
-          `[Floorplan] PUT /rooms/${room.id}/scan 200 — id=${persisted.id} areaSqFt=${persisted.areaSqFt}`
-        );
+        console.log(`[scanStore] saved server ${room.id} — id=${persisted.id}`);
+        saveSynced(room.id, persisted);
+        finalScanData = persisted;
       } catch (persistErr) {
-        console.warn(
-          "[Floorplan] PUT scan failed, falling back to localStorage:",
-          persistErr
-        );
-        saveScan(room.id, scanData);
+        console.warn("[scanStore] PUT failed, saving unsynced:", persistErr instanceof Error ? persistErr.message : persistErr);
+        saveUnsynced(room.id, scanData);
       }
 
       setRooms(prev =>
-        prev.map(r => r.id === room.id ? { ...r, scanData } : r)
+        prev.map(r => r.id === room.id ? { ...r, scanData: finalScanData } : r)
       );
 
       setScanSuccess(

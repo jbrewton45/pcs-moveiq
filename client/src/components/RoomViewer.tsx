@@ -1146,6 +1146,11 @@ export function RoomViewer({ scan: scanFromProps, items, onPlacementChanged, pri
       return;
     }
 
+    // Only open the "Drop item here" sheet if there are actually unplaced
+    // items to pick from. Otherwise the tap does nothing — prevents the sheet
+    // from popping up aggressively on every floor touch.
+    if (unplacedItems.length === 0) return;
+
     setSelectedItemId(null);
     setSelectedObjectId(null);
     setTagTargetMode("tag");

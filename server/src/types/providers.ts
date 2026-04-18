@@ -37,4 +37,5 @@ export interface IdentificationOutput {
   reasoning: string;
   isSpecialty?: boolean;
   clarifications?: ClarificationQuestion[];
+  identificationQuality?: "STRONG" | "MEDIUM" | "WEAK";
 }

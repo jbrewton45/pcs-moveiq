@@ -128,7 +128,7 @@ export async function listItemsByRoom(roomId: string): Promise<Item[]> {
   return Promise.all(base.map(hydrateItemPhotos));
 }
 
-async function getItemById(id: string): Promise<Item | undefined> {
+export async function getItemById(id: string): Promise<Item | undefined> {
   const result = await query('SELECT * FROM items WHERE id = $1', [id]);
   if (result.rows.length === 0) return undefined;
   const base = rowToItem(result.rows[0] as Record<string, unknown>);
@@ -161,37 +161,120 @@ export async function createItem(input: CreateItemInput): Promise<Item> {
 }
 
 /**
- * Apply a user-chosen action (sell/keep/ship/donate) to an item. Updates:
- *   - recommendation (authoritative user choice, overrides the AI guess)
- *   - status (workflow state: LISTED / KEPT / REVIEWED / DONATED)
- *   - keepFlag (true only for "keep" so scoring reflects the choice)
- *   - updatedAt
- * Does NOT touch pricing, placement, identification, or photos.
+ * Apply a user-chosen action (sell/keep/ship/donate/sold/discarded/shipped) to an
+ * item. Updates recommendation, status, keepFlag, updatedAt, and — on the first
+ * active→terminal transition — completedAt. Does NOT touch pricing, placement,
+ * identification, or photos.
+ *
+ * Returns { item, noOp: true } when the item is already in the target terminal
+ * state and no write is needed. Returns null when the item doesn't exist.
+ * Throws ItemActionConflictError when the item is already in a different terminal
+ * state (or sold with a different price).
  */
-export type ItemDecisionAction = "sell" | "keep" | "ship" | "donate" | "sold";
+export type ItemDecisionAction = "sell" | "keep" | "ship" | "donate" | "sold" | "discarded" | "shipped";
+
+// ── Workstream F: terminal-status helpers ──────────────────────────────────
+
+const COMPLETED_STATUSES: ReadonlySet<string> = new Set([
+  "SOLD", "DONATED", "SHIPPED", "DISCARDED",
+]);
+
+export function isItemCompleted(status: string): boolean {
+  return COMPLETED_STATUSES.has(status);
+}
+
+export class ItemActionConflictError extends Error {
+  constructor(
+    public readonly existingStatus: string,
+    public readonly existingSoldPriceUsd: number | null,
+  ) {
+    super("Item is already completed with a different action");
+    this.name = "ItemActionConflictError";
+  }
+}
 
 export async function applyItemAction(
   id: string,
   action: ItemDecisionAction,
   opts: { soldPriceUsd?: number | null } = {}
-): Promise<Item | null> {
-  const existingResult = await query('SELECT id FROM items WHERE id = $1', [id]);
+): Promise<{ item: Item; noOp: boolean } | null> {
+  // SELECT current state first — we need status, soldPriceUsd, completedAt
+  const existingResult = await query(
+    'SELECT status, "soldPriceUsd", "completedAt" FROM items WHERE id = $1',
+    [id]
+  );
   if (existingResult.rows.length === 0) return null;
 
-  const map: Record<ItemDecisionAction, { recommendation: string; status: string; keepFlag: boolean }> = {
-    sell:   { recommendation: "SELL_NOW", status: "LISTED",   keepFlag: false },
-    keep:   { recommendation: "KEEP",     status: "KEPT",     keepFlag: true  },
-    ship:   { recommendation: "SHIP",     status: "REVIEWED", keepFlag: false },
-    donate: { recommendation: "DONATE",   status: "DONATED",  keepFlag: false },
-    sold:   { recommendation: "COMPLETE", status: "SOLD",     keepFlag: false },
+  const existing = existingResult.rows[0] as {
+    status: string;
+    soldPriceUsd: number | null;
+    completedAt: string | null;
   };
-  const next = map[action];
+
+  const next = ACTION_MAP[action];
+  const targetStatus = next.status;
   const now = new Date().toISOString();
 
-  // Write the core decision fields + (when action="sold" and caller supplied a
-  // value) the realized sell price in the same statement so state stays
-  // consistent. When action !== "sold" the soldPriceUsd param is ignored so
-  // we leave the existing value untouched.
+  // ── Idempotency / conflict logic ─────────────────────────────────────────
+  if (isItemCompleted(existing.status)) {
+    // Same terminal status: check if this is a true no-op or a price backfill
+    if (targetStatus === existing.status) {
+      if (action === "sold") {
+        const newPrice = opts.soldPriceUsd !== undefined ? opts.soldPriceUsd : null;
+        const isSamePriceOrOmitted =
+          newPrice === null ||
+          newPrice === undefined ||
+          newPrice === existing.soldPriceUsd;
+
+        // Price backfill: existing SOLD with NULL price, caller provides a price
+        if (existing.soldPriceUsd == null && newPrice != null) {
+          // Allow the write — preserve original completedAt, just update the price
+          await query(
+            `UPDATE items
+                SET "soldPriceUsd" = $1,
+                    "updatedAt" = $2
+              WHERE id = $3`,
+            [newPrice, now, id]
+          );
+          const backfilled = await query('SELECT * FROM items WHERE id = $1', [id]);
+          const item = backfilled.rows.length > 0
+            ? await hydrateItemPhotos(rowToItem(backfilled.rows[0] as Record<string, unknown>))
+            : null;
+          if (!item) return null;
+          return { item, noOp: false };
+        }
+
+        // True no-op: same status, same (or omitted) price
+        if (isSamePriceOrOmitted) {
+          const row = await query('SELECT * FROM items WHERE id = $1', [id]);
+          const item = row.rows.length > 0
+            ? await hydrateItemPhotos(rowToItem(row.rows[0] as Record<string, unknown>))
+            : null;
+          if (!item) return null;
+          return { item, noOp: true };
+        }
+
+        // Different non-null price for already-sold item → conflict
+        throw new ItemActionConflictError(existing.status, existing.soldPriceUsd);
+      }
+
+      // Non-sold terminal no-op
+      const row = await query('SELECT * FROM items WHERE id = $1', [id]);
+      const item = row.rows.length > 0
+        ? await hydrateItemPhotos(rowToItem(row.rows[0] as Record<string, unknown>))
+        : null;
+      if (!item) return null;
+      return { item, noOp: true };
+    }
+
+    // Different terminal target — conflict
+    throw new ItemActionConflictError(existing.status, existing.soldPriceUsd);
+  }
+
+  // ── Active → any transition ───────────────────────────────────────────────
+  const isTerminalTransition = isItemCompleted(targetStatus);
+  const completedAt = isTerminalTransition ? now : null;
+
   if (action === "sold" && opts.soldPriceUsd !== undefined) {
     await query(
       `UPDATE items
@@ -199,9 +282,10 @@ export async function applyItemAction(
               status = $2,
               "keepFlag" = $3,
               "soldPriceUsd" = $4,
-              "updatedAt" = $5
-        WHERE id = $6`,
-      [next.recommendation, next.status, next.keepFlag, opts.soldPriceUsd, now, id]
+              "completedAt" = COALESCE("completedAt", $5),
+              "updatedAt" = $6
+        WHERE id = $7`,
+      [next.recommendation, next.status, next.keepFlag, opts.soldPriceUsd, completedAt, now, id]
     );
   } else {
     await query(
@@ -209,16 +293,19 @@ export async function applyItemAction(
           SET recommendation = $1,
               status = $2,
               "keepFlag" = $3,
-              "updatedAt" = $4
-        WHERE id = $5`,
-      [next.recommendation, next.status, next.keepFlag, now, id]
+              "completedAt" = COALESCE("completedAt", $4),
+              "updatedAt" = $5
+        WHERE id = $6`,
+      [next.recommendation, next.status, next.keepFlag, completedAt, now, id]
     );
   }
 
   const updated = await query('SELECT * FROM items WHERE id = $1', [id]);
-  return updated.rows.length > 0
+  const item = updated.rows.length > 0
     ? await hydrateItemPhotos(rowToItem(updated.rows[0] as Record<string, unknown>))
     : null;
+  if (!item) return null;
+  return { item, noOp: false };
 }
 
 /**
@@ -246,11 +333,13 @@ export async function updateItemSoldPrice(
 }
 
 const ACTION_MAP: Record<ItemDecisionAction, { recommendation: string; status: string; keepFlag: boolean }> = {
-  sell:   { recommendation: "SELL_NOW", status: "LISTED",   keepFlag: false },
-  keep:   { recommendation: "KEEP",     status: "KEPT",     keepFlag: true  },
-  ship:   { recommendation: "SHIP",     status: "REVIEWED", keepFlag: false },
-  donate: { recommendation: "DONATE",   status: "DONATED",  keepFlag: false },
-  sold:   { recommendation: "COMPLETE", status: "SOLD",     keepFlag: false },
+  sell:      { recommendation: "SELL_NOW", status: "LISTED",    keepFlag: false },
+  keep:      { recommendation: "KEEP",     status: "KEPT",      keepFlag: true  },
+  ship:      { recommendation: "SHIP",     status: "REVIEWED",  keepFlag: false },
+  donate:    { recommendation: "DONATE",   status: "DONATED",   keepFlag: false },
+  sold:      { recommendation: "COMPLETE", status: "SOLD",      keepFlag: false },
+  discarded: { recommendation: "DISCARD",  status: "DISCARDED", keepFlag: false },
+  shipped:   { recommendation: "SHIP",     status: "SHIPPED",   keepFlag: false },
 };
 
 /**
@@ -678,6 +767,11 @@ export async function rederiveRecommendation(itemId: string): Promise<Item | nul
   if (result.rows.length === 0) return null;
 
   const item = rowToItem(result.rows[0] as Record<string, unknown>);
+
+  // Workstream F: never re-derive for completed items — their recommendation is
+  // the terminal record of what was decided and must not be overwritten.
+  if (isItemCompleted(item.status)) return item;
+
   const projectResult = await query(
     'SELECT "moveType", "housingAssumption" FROM projects WHERE id = $1',
     [item.projectId]

@@ -16,6 +16,8 @@ export function rowToItem(row: Record<string, unknown>): Item {
     identificationConfidence: (row.identificationConfidence as number | null) ?? undefined,
     identificationReasoning: (row.identificationReasoning as string | null) ?? undefined,
     identificationStatus: ((row.identificationStatus as string | null) ?? "NONE") as Item["identificationStatus"],
+    identificationQuality: (row.identificationQuality as string | null) ?? undefined,
+    pricingEligible: row.pricingEligible == null ? undefined : !!row.pricingEligible,
     priceFastSale: (row.priceFastSale as number | null) ?? undefined,
     priceFairMarket: (row.priceFairMarket as number | null) ?? undefined,
     priceReach: (row.priceReach as number | null) ?? undefined,
@@ -33,6 +35,7 @@ export function rowToItem(row: Record<string, unknown>): Item {
     rotationY: (row.rotationY as number | null) ?? undefined,
     listingUrl: (row.listingUrl as string | null) ?? undefined,
     soldPriceUsd: (row.soldPriceUsd as number | null) ?? undefined,
+    completedAt: (row.completedAt as string | null) ?? undefined,
   } as Item;
 }
 

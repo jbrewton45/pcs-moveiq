@@ -8,6 +8,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { api, getToken, setToken } from "./api";
+import { setUserId, clearUserId, clearAll as clearScanCache } from "./plugins/scanStore";
 import type { UserPublic } from "./types";
 import { AppLayout } from "./components/AppLayout";
 import { AuthScreen } from "./components/AuthScreen";
@@ -191,7 +192,7 @@ function App() {
       api
         .getMe()
         .then((u) => {
-          if (!cancelled) setUser(u);
+          if (!cancelled) { setUserId(u.id); setUser(u); }
         })
         .catch(() => {
           if (!cancelled) setToken(null);
@@ -219,6 +220,8 @@ function App() {
 
   function handleLogout() {
     setToken(null);
+    clearScanCache();
+    clearUserId();
     setUser(null);
   }
 

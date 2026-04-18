@@ -6,9 +6,10 @@ import { createId } from "../utils/id.js";
 import { claudePricing, isClaudeAvailable } from "../providers/claude.provider.js";
 import { openaiPricing, openaiWebSearchComparables, isOpenAIAvailable } from "../providers/openai.provider.js";
 import { isEbayAvailable, ebayComparables } from "../providers/ebay.provider.js";
-import { rederiveRecommendation } from "./items.service.js";
+import { rederiveRecommendation, isItemCompleted } from "./items.service.js";
 import { normalizeModel, applyPriceGuardrails } from "../utils/model-normalizer.js";
 import { groupComparablesByConfig, generateConfigClarifications } from "../utils/comparable-config.js";
+import { computeIdentificationQuality, isPricingEligible } from "../utils/identification-quality.js";
 
 interface PricingResult {
   fastSale: number;
@@ -25,6 +26,48 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
   const itemResult = await query('SELECT * FROM items WHERE id = $1', [itemId]);
   if (itemResult.rows.length === 0) return null;
   const item = rowToItem(itemResult.rows[0] as Record<string, unknown>);
+
+  // Workstream F: completed items are finalized — return current state without
+  // running the pricing pipeline or touching any DB columns.
+  if (isItemCompleted(item.status)) {
+    return { item, comparables: await getItemComparables(itemId) };
+  }
+
+  // Defensive gate: if identification is weak, short-circuit with zero provider calls.
+  const quality = item.identificationQuality
+    ?? computeIdentificationQuality({
+         identifiedName:     item.identifiedName ?? item.itemName,
+         identifiedCategory: item.identifiedCategory ?? item.category,
+         identifiedBrand:    item.identifiedBrand,
+         identifiedModel:    item.identifiedModel,
+         confidence:         item.identificationConfidence ?? 0,
+         provider:           "mock",
+       });
+  const eligible = item.pricingEligible ?? isPricingEligible(quality);
+
+  if (!eligible) {
+    const now = new Date().toISOString();
+    const reason = "Identification too weak for reliable market pricing";
+    await query(
+      `UPDATE items SET
+         "priceFastSale" = NULL, "priceFairMarket" = NULL, "priceReach" = NULL,
+         "pricingConfidence" = NULL,
+         "pricingReasoning" = $1,
+         "pricingSuggestedChannel" = NULL, "pricingSaleSpeedBand" = NULL,
+         "pricingLastUpdatedAt" = $2, "updatedAt" = $3,
+         "identificationQuality" = COALESCE("identificationQuality", $4),
+         "pricingEligible" = FALSE
+       WHERE id = $5`,
+      [reason, now, now, quality, itemId]
+    );
+    await query('DELETE FROM comparables WHERE "itemId" = $1', [itemId]);
+    await rederiveRecommendation(itemId);
+    const finalResult = await query('SELECT * FROM items WHERE id = $1', [itemId]);
+    return {
+      item: rowToItem(finalResult.rows[0] as Record<string, unknown>),
+      comparables: [],
+    };
+  }
 
   const lookupInput: ComparableLookupInput = {
     itemName: item.identifiedName ?? item.itemName,

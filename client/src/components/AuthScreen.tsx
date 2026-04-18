@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, setToken } from "../api";
+import { setUserId } from "../plugins/scanStore";
 import type { UserPublic } from "../types";
 
 interface Props {
@@ -23,10 +24,12 @@ export function AuthScreen({ onAuth }: Props) {
       if (mode === "signup") {
         const result = await api.signup(email, password, displayName);
         setToken(result.token);
+        setUserId(result.user.id);
         onAuth(result.user);
       } else {
         const result = await api.login(email, password);
         setToken(result.token);
+        setUserId(result.user.id);
         onAuth(result.user);
       }
     } catch (err) {

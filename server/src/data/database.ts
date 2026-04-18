@@ -92,6 +92,8 @@ export async function initializeSchema() {
       "identificationConfidence" DOUBLE PRECISION,
       "identificationReasoning" TEXT,
       "identificationStatus" TEXT DEFAULT 'NONE',
+      "identificationQuality" TEXT,
+      "pricingEligible"       BOOLEAN,
       "priceFastSale" DOUBLE PRECISION,
       "priceFairMarket" DOUBLE PRECISION,
       "priceReach" DOUBLE PRECISION,
@@ -103,6 +105,7 @@ export async function initializeSchema() {
       "recommendationReason" TEXT,
       "pendingClarifications" TEXT,
       "clarificationAnswers" TEXT,
+      "completedAt" TEXT,
       "createdAt" TEXT NOT NULL,
       "updatedAt" TEXT NOT NULL
     );
@@ -192,5 +195,16 @@ export async function initializeSchema() {
     -- actually sells so we can show revenue totals and feed back into future
     -- recommendations.
     ALTER TABLE items ADD COLUMN IF NOT EXISTS "soldPriceUsd" REAL;
+
+    -- Identification quality tier and pricing eligibility flag. Computed
+    -- server-side from identifiedName, identifiedCategory, confidence, and
+    -- provider; never written by providers directly.
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "identificationQuality" TEXT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "pricingEligible"       BOOLEAN;
+
+    -- Workstream F: timestamp when an item reached a terminal status
+    -- (SOLD, DONATED, SHIPPED, DISCARDED). Existing terminal-status rows
+    -- keep completedAt = NULL — no backfill is performed.
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "completedAt" TEXT;
   `);
 }

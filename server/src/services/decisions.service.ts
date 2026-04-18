@@ -276,7 +276,10 @@ export async function getPriceCalibration(projectId: string): Promise<PriceCalib
  *  from prioritization so they don't linger at the top of "Do This First". */
 const COMPLETED_STATUSES = new Set<string>(["SOLD", "DONATED", "SHIPPED", "DISCARDED"]);
 
-export async function prioritizeProject(projectId: string): Promise<PrioritizedItem[]> {
+export async function prioritizeProject(
+  projectId: string,
+  opts: { limit?: number } = {},
+): Promise<PrioritizedItem[]> {
   const [project, items, calibration] = await Promise.all([
     getProjectById(projectId),
     listItemsByProject(projectId),
@@ -286,10 +289,10 @@ export async function prioritizeProject(projectId: string): Promise<PrioritizedI
   const active = items.filter((it) => !COMPLETED_STATUSES.has(it.status));
   const scored = active.map((it) => scoreItem(it, hardMoveDate, calibration));
 
-  // Sort by score desc; tiebreaker on itemName asc to keep results stable.
+  // Sort by score desc; tiebreaker on itemId asc to keep results stable.
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     return a.itemId.localeCompare(b.itemId);
   });
-  return scored;
+  return opts.limit != null ? scored.slice(0, opts.limit) : scored;
 }

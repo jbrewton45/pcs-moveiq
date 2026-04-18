@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import type { Item, ItemCondition, ItemStatus, SizeClass, Recommendation, Comparable, ComparableSource, ClarificationQuestion, RoomScan } from "../types";
+import type { Item, ItemCondition, ItemStatus, SizeClass, Recommendation, Comparable, ComparableSource, ClarificationQuestion, RoomScan, ItemDecisionResult } from "../types";
+import { isCompleted } from "../types";
 import { api, getUploadUrl } from "../api";
+import { CompletionStats } from "./CompletionStats";
 import { VoiceCapture } from "./VoiceCapture";
 import { BottomSheet } from "./ui/BottomSheet";
 import { ConfirmSheet } from "./ui/ConfirmSheet";
 import { RoomViewer } from "./RoomViewer";
+import { IdentificationCorrectionForm } from "./IdentificationCorrectionForm";
 
 function label(s: string) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -149,6 +152,200 @@ function ConfigTierBadge({ reasoning }: { reasoning: string }) {
   return <span className={`config-badge ${info.cls}`}>{info.label}</span>;
 }
 
+// ---------- DecisionCard ----------
+
+const ACTION_COLORS: Record<string, string> = {
+  SELL_NOW: "#ef4444", SELL_LATER: "#f97316", SHIP: "#3b82f6",
+  STORE: "#6b7280", DONATE: "#eab308", DISCARD: "#475569",
+};
+const ACTION_LABELS: Record<string, string> = {
+  SELL_NOW: "Sell Now", SELL_LATER: "Sell Later", SHIP: "Ship",
+  STORE: "Store", DONATE: "Donate", DISCARD: "Discard",
+};
+const CONF_DOTS: Record<string, string> = { HIGH: "🟢", MEDIUM: "🟡", LOW: "🔴" };
+
+function DecisionCard({ decision, analysisStep }: {
+  decision: ItemDecisionResult | null;
+  analysisStep: string | null;
+}) {
+  if (analysisStep) {
+    return (
+      <div style={{
+        background: "rgba(59,130,246,0.06)", border: "1px solid var(--accent-border, rgba(59,130,246,0.25))",
+        borderRadius: 10, padding: "12px 14px", marginTop: 8,
+      }}>
+        <p style={{ fontSize: 13, color: "var(--accent-light, #3b82f6)", fontWeight: 600, margin: 0 }}>
+          {analysisStep}
+        </p>
+      </div>
+    );
+  }
+  if (!decision) return null;
+
+  const actionColor = ACTION_COLORS[decision.recommendedAction] ?? "#6b7280";
+  const urgencyPct = decision.urgencyScore;
+
+  return (
+    <div style={{
+      background: "var(--bg-elevated, #f8fafc)", border: "1px solid var(--border-soft)",
+      borderRadius: 10, padding: "12px 14px", marginTop: 8,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <span style={{
+          display: "inline-block", padding: "3px 10px", borderRadius: 6,
+          background: actionColor, color: "#fff", fontSize: 12, fontWeight: 700,
+        }}>
+          {ACTION_LABELS[decision.recommendedAction] ?? decision.recommendedAction}
+        </span>
+        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          {CONF_DOTS[decision.confidenceLevel] ?? ""} {decision.confidenceLevel} confidence
+        </span>
+      </div>
+
+      <div style={{ height: 6, borderRadius: 3, background: "rgba(148,163,184,0.15)", marginBottom: 8, overflow: "hidden" }}>
+        <div style={{
+          height: "100%", width: `${urgencyPct}%`, borderRadius: 3,
+          background: urgencyPct >= 60 ? "#ef4444" : urgencyPct >= 30 ? "#f97316" : "#22c55e",
+          transition: "width 0.3s ease",
+        }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
+        <span>Urgency: {urgencyPct}/100</span>
+        <span>Pricing confidence: {Math.round(decision.pricingConfidence * 100)}%</span>
+      </div>
+
+      <p style={{ fontSize: 13, color: "var(--text-primary)", margin: "0 0 6px", lineHeight: 1.4 }}>
+        {decision.rationale}
+      </p>
+
+      {decision.recommendedPlatform && (
+        <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: 0 }}>
+          Platform: <strong>{decision.recommendedPlatform}</strong>
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------- MarkDonePopover ----------
+
+interface MarkDonePopoverProps {
+  item: Item;
+  actioning: boolean;
+  errorMsg: string | null;
+  onMarkAction: (itemId: string, action: "sold" | "donate" | "discarded" | "shipped", finalPrice?: number) => Promise<boolean>;
+}
+
+function MarkDonePopover({ item, actioning, errorMsg, onMarkAction }: MarkDonePopoverProps) {
+  const [showOptions, setShowOptions] = useState(false);
+  const [showPriceInput, setShowPriceInput] = useState(false);
+  const [soldPrice, setSoldPrice] = useState("");
+
+  async function handleNonSoldAction(action: "donate" | "discarded" | "shipped") {
+    const ok = await onMarkAction(item.id, action);
+    if (ok) setShowOptions(false);
+  }
+
+  async function handleSoldConfirm() {
+    const trimmed = soldPrice.trim();
+    const parsed = parseFloat(trimmed);
+    if (trimmed === "" || isNaN(parsed) || parsed < 0) return;
+    const ok = await onMarkAction(item.id, "sold", parsed);
+    if (ok) {
+      setShowOptions(false);
+      setShowPriceInput(false);
+      setSoldPrice("");
+    }
+  }
+
+  return (
+    <div className="mark-done-popover">
+      <button
+        type="button"
+        className="btn-mark-done"
+        disabled={actioning}
+        onClick={() => {
+          setShowOptions((v) => !v);
+          setShowPriceInput(false);
+          setSoldPrice("");
+        }}
+      >
+        Mark Done…
+      </button>
+      {showOptions && (
+        <>
+          {errorMsg && <p className="item-error-text">{errorMsg}</p>}
+          {showPriceInput ? (
+            <div className="mark-done-popover__price-row">
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                inputMode="decimal"
+                placeholder="Sale price"
+                value={soldPrice}
+                onChange={(e) => setSoldPrice(e.target.value)}
+                disabled={actioning}
+              />
+              <button
+                type="button"
+                className="mark-done-popover__option"
+                disabled={actioning || soldPrice.trim() === "" || parseFloat(soldPrice.trim()) < 0}
+                onClick={() => void handleSoldConfirm()}
+              >
+                {actioning ? "..." : "Confirm"}
+              </button>
+              <button
+                type="button"
+                className="mark-done-popover__option"
+                disabled={actioning}
+                onClick={() => { setShowPriceInput(false); setSoldPrice(""); }}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="mark-done-popover__grid">
+              <button
+                type="button"
+                className="mark-done-popover__option"
+                disabled={actioning}
+                onClick={() => setShowPriceInput(true)}
+              >
+                Sold
+              </button>
+              <button
+                type="button"
+                className="mark-done-popover__option"
+                disabled={actioning}
+                onClick={() => void handleNonSoldAction("donate")}
+              >
+                {actioning ? "..." : "Donated"}
+              </button>
+              <button
+                type="button"
+                className="mark-done-popover__option"
+                disabled={actioning}
+                onClick={() => void handleNonSoldAction("shipped")}
+              >
+                {actioning ? "..." : "Shipped"}
+              </button>
+              <button
+                type="button"
+                className="mark-done-popover__option"
+                disabled={actioning}
+                onClick={() => void handleNonSoldAction("discarded")}
+              >
+                {actioning ? "..." : "Discarded"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ---------- ItemReadCard ----------
 interface ItemReadCardProps {
   item: Item;
@@ -165,9 +362,26 @@ interface ItemReadCardProps {
   confirming: boolean;
   comparables: Comparable[];
   identifyError: boolean;
+  identifyErrorMsg?: string;
+  identifyWarning: boolean;
   pricingError: boolean;
   collapseSignal: number;
   expandSignal: number;
+  onFullAnalysis: (id: string) => void;
+  analyzing: boolean;
+  analysisStep: string | null;
+  decision: ItemDecisionResult | null;
+  onCorrectAndReprice: (itemId: string, edits: {
+    identifiedName: string;
+    identifiedCategory: string;
+    identifiedBrand: string | null;
+    identifiedModel: string | null;
+  }) => Promise<boolean>;
+  correcting: boolean;
+  correctError: string | null;
+  onMarkAction: (itemId: string, action: "sold" | "donate" | "discarded" | "shipped", finalPrice?: number) => Promise<boolean>;
+  actioning: boolean;
+  actionError: string | null;
 }
 
 function ItemReadCard({
@@ -185,12 +399,29 @@ function ItemReadCard({
   confirming,
   comparables,
   identifyError,
+  identifyErrorMsg,
+  identifyWarning,
   pricingError,
   collapseSignal,
   expandSignal,
+  onFullAnalysis,
+  analyzing,
+  analysisStep,
+  decision,
+  onCorrectAndReprice,
+  correcting,
+  correctError,
+  onMarkAction,
+  actioning,
+  actionError,
 }: ItemReadCardProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submittingClarifications, setSubmittingClarifications] = useState(false);
+  const [showMediumRefine, setShowMediumRefine] = useState(false);
+  const quality = item.identificationQuality ?? "STRONG";
+  const isWeak = quality === "WEAK";
+  const isMedium = quality === "MEDIUM";
+  const isItemCompleted_ = isCompleted(item);
   const scannedItem = isScannedItem(item);
   const [expanded, setExpanded] = useState(!scannedItem);
   const [showComparables, setShowComparables] = useState(false);
@@ -233,6 +464,7 @@ function ItemReadCard({
     "item-card",
     selectMode ? "item-card--selectable" : "",
     selected ? "item-card--selected" : "",
+    isItemCompleted_ ? "item-card--completed" : "",
   ].filter(Boolean).join(" ");
 
   return (
@@ -263,6 +495,13 @@ function ItemReadCard({
             </button>
           )}
           <RecBadge recommendation={item.recommendation} />
+          {isItemCompleted_ && (
+            <span className={`completion-badge completion-badge--${item.status.toLowerCase()}`}>
+              {item.status === "SOLD" && item.soldPriceUsd != null
+                ? `Sold $${item.soldPriceUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                : item.status.charAt(0) + item.status.slice(1).toLowerCase()}
+            </span>
+          )}
         </div>
         {item.recommendationReason && (
           <p className="item-card__rec-reason">{item.recommendationReason}</p>
@@ -328,31 +567,85 @@ function ItemReadCard({
 
             {item.identificationStatus !== "NONE" && (
               <div className="item-card__identification">
-                <div className="id-header">
-                  <span className={`id-status-badge id-status-badge--${item.identificationStatus.toLowerCase()}`}>
-                    {item.identificationStatus === "SUGGESTED" ? "AI Suggested" : item.identificationStatus === "CONFIRMED" ? "Confirmed" : "Edited"}
-                  </span>
-                  <ConfidenceDots value={item.identificationConfidence ?? 0} />
-                </div>
-                <p className="id-details">
-                  <strong>{item.identifiedName}</strong>
-                  {item.identifiedBrand && <span> by {item.identifiedBrand}</span>}
-                  {item.identifiedModel && <span> ({item.identifiedModel})</span>}
-                </p>
-                {item.identificationReasoning && <p className="id-reasoning">{cleanReasoning(item.identificationReasoning)}</p>}
-                <ProviderBadge reasoning={item.identificationReasoning} />
-                {item.identificationStatus === "SUGGESTED" && (
-                  <div className="id-confirm-actions">
-                    <button className="btn-confirm" disabled={confirming} onClick={() => onConfirm(item.id)}>
-                      {confirming ? "..." : "Confirm"}
-                    </button>
-                    <button className="btn-edit-id" onClick={() => onEdit(item.id)}>Edit</button>
-                  </div>
+                {!isItemCompleted_ && isWeak && item.identificationStatus === "SUGGESTED" ? (
+                  <IdentificationCorrectionForm
+                    variant="weak"
+                    item={item}
+                    submitting={correcting}
+                    errorMsg={correctError}
+                    onSubmit={(edits) => onCorrectAndReprice(item.id, edits)}
+                  />
+                ) : isMedium && item.identificationStatus === "SUGGESTED" ? (
+                  <>
+                    <div className="id-header">
+                      <span className={`id-status-badge id-status-badge--${item.identificationStatus.toLowerCase()}`}>
+                        AI Suggested
+                      </span>
+                      <ConfidenceDots value={item.identificationConfidence ?? 0} />
+                    </div>
+                    <p className="id-details">
+                      <strong>{item.identifiedName}</strong>
+                      {item.identifiedBrand && <span> by {item.identifiedBrand}</span>}
+                      {item.identifiedModel && <span> ({item.identifiedModel})</span>}
+                    </p>
+                    {item.identificationReasoning && <p className="id-reasoning">{cleanReasoning(item.identificationReasoning)}</p>}
+                    <ProviderBadge reasoning={item.identificationReasoning} />
+                    <div className="id-confirm-actions">
+                      <button className="btn-confirm" disabled={confirming} onClick={() => onConfirm(item.id)}>
+                        {confirming ? "..." : "Confirm"}
+                      </button>
+                      <button className="btn-edit-id" onClick={() => onEdit(item.id)}>Edit</button>
+                      <button
+                        type="button"
+                        className="btn-improve-accuracy"
+                        onClick={() => setShowMediumRefine((v) => !v)}
+                      >
+                        {showMediumRefine ? "Cancel refinement" : "Improve accuracy"}
+                      </button>
+                    </div>
+                    {showMediumRefine && (
+                      <IdentificationCorrectionForm
+                        variant="medium"
+                        item={item}
+                        submitting={correcting}
+                        errorMsg={correctError}
+                        onSubmit={async (edits) => {
+                          const ok = await onCorrectAndReprice(item.id, edits);
+                          if (ok) setShowMediumRefine(false);
+                        }}
+                        onCancel={() => setShowMediumRefine(false)}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="id-header">
+                      <span className={`id-status-badge id-status-badge--${item.identificationStatus.toLowerCase()}`}>
+                        {item.identificationStatus === "SUGGESTED" ? "AI Suggested" : item.identificationStatus === "CONFIRMED" ? "Confirmed" : "Edited"}
+                      </span>
+                      <ConfidenceDots value={item.identificationConfidence ?? 0} />
+                    </div>
+                    <p className="id-details">
+                      <strong>{item.identifiedName}</strong>
+                      {item.identifiedBrand && <span> by {item.identifiedBrand}</span>}
+                      {item.identifiedModel && <span> ({item.identifiedModel})</span>}
+                    </p>
+                    {item.identificationReasoning && <p className="id-reasoning">{cleanReasoning(item.identificationReasoning)}</p>}
+                    <ProviderBadge reasoning={item.identificationReasoning} />
+                    {item.identificationStatus === "SUGGESTED" && (
+                      <div className="id-confirm-actions">
+                        <button className="btn-confirm" disabled={confirming} onClick={() => onConfirm(item.id)}>
+                          {confirming ? "..." : "Confirm"}
+                        </button>
+                        <button className="btn-edit-id" onClick={() => onEdit(item.id)}>Edit</button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
 
-            {clarifications.length > 0 && (
+            {!isItemCompleted_ && clarifications.length > 0 && (
               <div className="clarification-section">
                 <h4 className="clarification-section__title">Quick Questions</h4>
                 <p className="clarification-section__subtitle">These details could significantly affect pricing</p>
@@ -414,7 +707,7 @@ function ItemReadCard({
               </div>
             )}
 
-            {item.priceFairMarket != null ? (
+            {!isWeak && (item.priceFairMarket != null ? (
               <div className="item-card__pricing">
                 <div className="pricing-bands">
                   <div className="pricing-band">
@@ -455,7 +748,7 @@ function ItemReadCard({
                 <p className="pricing-no-estimate">No trustworthy estimate available</p>
                 <p className="pricing-reasoning">{item.pricingReasoning}</p>
               </div>
-            ) : null}
+            ) : null)}
 
             {comparables.length > 0 && (
               <div className="comp-list">
@@ -506,20 +799,44 @@ function ItemReadCard({
           </>
         )}
 
-        {!selectMode && (
+        {!selectMode && !isItemCompleted_ && (
           <div className="item-card__actions">
             {(item.identificationStatus === "NONE" || item.identificationStatus === "CONFIRMED" || item.identificationStatus === "EDITED") && (
               <button className="btn-action-sm" disabled={identifying} onClick={() => onIdentify(item.id)}>
                 {identifying ? "Identifying..." : item.identificationStatus === "NONE" ? "Identify" : "Re-identify"}
               </button>
             )}
-            {identifyError && <p className="item-error-text">Could not analyze this item. Try again later.</p>}
-            <button className="btn-action-sm" disabled={pricing} onClick={() => onPricing(item.id)}>
-              {pricing ? "Getting pricing..." : (item.priceFairMarket != null || item.pricingReasoning) ? "Retry Pricing" : "Get Pricing"}
-            </button>
-            {pricingError && <p className="item-error-text">Could not get pricing. Try again later.</p>}
+            {identifyError && <p className="item-error-text">{identifyErrorMsg || "Could not analyze this item."} <span style={{ textDecoration: "underline", cursor: "pointer" }} onClick={() => onIdentify(item.id)}>Retry</span></p>}
+            {identifyWarning && <p className="item-error-text" style={{ color: "var(--text-muted, #6b7280)" }}>AI provider unavailable — result is an estimate only. Add a photo and retry for better accuracy.</p>}
+            {!isWeak && (
+              <>
+                <button className="btn-action-sm" disabled={pricing} onClick={() => onPricing(item.id)}>
+                  {pricing ? "Getting pricing..." : (item.priceFairMarket != null || item.pricingReasoning) ? "Retry Pricing" : "Get Pricing"}
+                </button>
+                {pricingError && <p className="item-error-text">Could not get pricing. Try again later.</p>}
+                <button
+                  className="btn-action-sm"
+                  disabled={analyzing || identifying || pricing}
+                  onClick={() => onFullAnalysis(item.id)}
+                  style={{ marginTop: 4, background: "var(--accent, #3b82f6)", color: "#fff", border: "none" }}
+                >
+                  {analyzing ? (analysisStep ?? "Analyzing...") : "Full Analysis"}
+                </button>
+              </>
+            )}
           </div>
         )}
+
+        {!selectMode && !isItemCompleted_ && (
+          <MarkDonePopover
+            item={item}
+            actioning={actioning}
+            errorMsg={actionError}
+            onMarkAction={onMarkAction}
+          />
+        )}
+
+        <DecisionCard decision={decision} analysisStep={analyzing ? analysisStep : null} />
       </div>
     </div>
   );
@@ -856,7 +1173,15 @@ export function RoomDetailView({
   const [pricing, setPricing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [identifyError, setIdentifyError] = useState<string | null>(null);
+  const [identifyErrorMsg, setIdentifyErrorMsg] = useState<string | null>(null);
+  const [identifyWarning, setIdentifyWarning] = useState<string | null>(null);
   const [pricingError, setPricingError] = useState<string | null>(null);
+
+  // Full analysis state (per-item)
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [analysisStep, setAnalysisStep] = useState<string | null>(null);
+  const [decisions, setDecisions] = useState<Record<string, ItemDecisionResult>>({});
+  const [pcsDate, setPcsDate] = useState<string | null>(null);
 
   // Bulk selection state
   const [selectMode, setSelectMode] = useState(false);
@@ -903,7 +1228,7 @@ export function RoomDetailView({
       .listItems({ roomId })
       .then(async (fetchedItems) => {
         setItems(fetchedItems);
-        const pricedItems = fetchedItems.filter(i => i.priceFairMarket != null);
+        const pricedItems = fetchedItems.filter(i => i.priceFairMarket != null && !isCompleted(i));
         const compEntries = await Promise.all(
           pricedItems.map(async i => [i.id, await api.getComparables(i.id).catch(() => [])] as const)
         );
@@ -969,6 +1294,89 @@ export function RoomDetailView({
       setFormError(err instanceof Error ? err.message : "Failed to create item");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  // Fetch PCS date for decision engine
+  useEffect(() => {
+    let cancelled = false;
+    api.getProject(projectId)
+      .then(p => { if (!cancelled) setPcsDate(p.hardMoveDate ?? null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  async function handleFullAnalysis(itemId: string) {
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+
+    setAnalyzingId(itemId);
+    setAnalysisStep("Analyzing item...");
+
+    try {
+      // Step 1: Identify (if needed)
+      let identified = item;
+      if (item.identificationStatus === "NONE") {
+        setAnalysisStep("Identifying item...");
+        identified = await api.identifyItem(itemId);
+        setRefreshKey(k => k + 1);
+      }
+
+      // Step 2: Get pricing (if needed)
+      if (identified.priceFairMarket == null) {
+        setAnalysisStep("Getting AI pricing...");
+        const pricingResult = await api.getItemPricing(itemId);
+        setComparables(prev => ({ ...prev, [itemId]: pricingResult.comparables }));
+        identified = pricingResult.item;
+        setRefreshKey(k => k + 1);
+      }
+
+      // Step 3: Fetch eBay sold data
+      setAnalysisStep("Fetching market data...");
+      let ebayData: { avgPrice?: number; medianPrice?: number; lowPrice?: number; highPrice?: number; listingCount?: number } = {};
+      try {
+        const searchQuery = identified.identifiedName ?? identified.itemName;
+        const sold = await api.getEbaySoldListings(searchQuery, identified.condition);
+        if (sold.sampleListings.length > 0) {
+          ebayData = {
+            avgPrice: sold.avgPrice,
+            medianPrice: sold.medianPrice,
+            lowPrice: sold.lowPrice,
+            highPrice: sold.highPrice,
+            listingCount: sold.totalFound,
+          };
+        }
+      } catch {
+        // eBay unavailable — continue without it
+      }
+
+      // Step 4: Call decision engine
+      setAnalysisStep("Calculating recommendation...");
+      const decision = await api.getItemDecision({
+        itemName: identified.identifiedName ?? identified.itemName,
+        category: identified.identifiedCategory ?? identified.category,
+        condition: identified.condition,
+        sizeClass: identified.sizeClass,
+        weightLbs: identified.weightLbs,
+        priceFairMarket: identified.priceFairMarket,
+        priceFastSale: identified.priceFastSale,
+        ebayAvgPrice: ebayData.avgPrice,
+        ebayMedianPrice: ebayData.medianPrice,
+        ebayLowPrice: ebayData.lowPrice,
+        ebayHighPrice: ebayData.highPrice,
+        ebayListingCount: ebayData.listingCount,
+        pcsDate: pcsDate ?? undefined,
+        keepFlag: identified.keepFlag,
+        sentimentalFlag: identified.sentimentalFlag,
+        willingToSell: identified.willingToSell,
+      });
+
+      setDecisions(prev => ({ ...prev, [itemId]: decision }));
+    } catch (err) {
+      console.error("[analysis] failed:", err instanceof Error ? err.message : err);
+    } finally {
+      setAnalyzingId(null);
+      setAnalysisStep(null);
     }
   }
 
@@ -1038,11 +1446,16 @@ export function RoomDetailView({
   async function handleIdentify(itemId: string) {
     setIdentifying(itemId);
     setIdentifyError(null);
+    setIdentifyWarning(null);
     try {
-      await api.identifyItem(itemId);
+      const identified = await api.identifyItem(itemId);
       setRefreshKey(k => k + 1);
-    } catch {
+      if (identified.identificationReasoning?.startsWith("[Mock]") || identified.identificationReasoning?.startsWith("[Fallback]")) {
+        setIdentifyWarning(itemId);
+      }
+    } catch (err) {
       setIdentifyError(itemId);
+      setIdentifyErrorMsg(err instanceof Error ? err.message : "Identification failed");
     } finally {
       setIdentifying(null);
     }
@@ -1069,6 +1482,61 @@ export function RoomDetailView({
       setRefreshKey(k => k + 1);
     } catch { /* silent */ }
     finally { setConfirming(false); }
+  }
+
+  const [correctingId, setCorrectingId] = useState<string | null>(null);
+  const [correctErrorByItem, setCorrectErrorByItem] = useState<Record<string, string>>({});
+
+  async function handleCorrectAndReprice(
+    itemId: string,
+    edits: {
+      identifiedName: string;
+      identifiedCategory: string;
+      identifiedBrand: string | null;
+      identifiedModel: string | null;
+    },
+  ): Promise<boolean> {
+    setCorrectingId(itemId);
+    setCorrectErrorByItem(prev => { const n = { ...prev }; delete n[itemId]; return n; });
+    try {
+      const result = await api.correctAndReprice(itemId, edits);
+      setItems(prev => prev.map(i => (i.id === itemId ? result.item : i)));
+      setComparables(prev => ({ ...prev, [itemId]: result.comparables }));
+      return true;
+    } catch (err) {
+      setCorrectErrorByItem(prev => ({
+        ...prev,
+        [itemId]: err instanceof Error ? err.message : "Correction failed",
+      }));
+      return false;
+    } finally {
+      setCorrectingId(null);
+    }
+  }
+
+  const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+  const [actionErrorByItem, setActionErrorByItem] = useState<Record<string, string>>({});
+
+  async function handleMarkAction(
+    itemId: string,
+    action: "sold" | "donate" | "discarded" | "shipped",
+    finalPrice?: number,
+  ): Promise<boolean> {
+    setActionBusyId(itemId);
+    setActionErrorByItem(prev => { const n = { ...prev }; delete n[itemId]; return n; });
+    try {
+      const updated = await api.markItemAction(itemId, action, { finalPrice });
+      setItems(prev => prev.map(i => (i.id === itemId ? updated : i)));
+      return true;
+    } catch (err) {
+      setActionErrorByItem(prev => ({
+        ...prev,
+        [itemId]: err instanceof Error ? err.message : "Action failed",
+      }));
+      return false;
+    } finally {
+      setActionBusyId(null);
+    }
   }
 
   function handleItemUpdated(updated: Item) {
@@ -1101,6 +1569,7 @@ export function RoomDetailView({
   const editedItem = editingItemId ? items.find((i) => i.id === editingItemId) ?? null : null;
   const roomWeight = items.reduce((sum, i) => sum + (i.weightLbs ?? 0), 0);
   const scannedItemCount = items.filter(isScannedItem).length;
+  const remainingItemCount = items.filter(i => !isCompleted(i)).length;
 
   function openIntake(mode: "manual" | "voice" | "walkthrough") {
     setIntakeMode(mode);
@@ -1165,17 +1634,42 @@ export function RoomDetailView({
         </div>
       </div>
 
-      {roomScan && (
-        <section style={{ marginBottom: "var(--space-4)" }}>
-          <h3 className="section-heading" style={{ marginBottom: "var(--space-3)" }}>Room Layout</h3>
+      <CompletionStats items={items} />
+
+      <section style={{ marginBottom: "var(--space-4)" }}>
+        <h3 className="section-heading" style={{ marginBottom: "var(--space-3)" }}>Room Layout</h3>
+        {roomScan ? (
           <RoomViewer
             scan={roomScan}
             items={items}
             onPlacementChanged={() => setRefreshKey(k => k + 1)}
             priorityByItemId={priorityByItemId}
           />
-        </section>
-      )}
+        ) : (
+          <div style={{
+            background: "var(--bg-card)", border: "1px solid var(--border-soft)",
+            borderRadius: "var(--radius-md)", padding: "24px 16px", textAlign: "center",
+          }}>
+            <p style={{ fontSize: 28, margin: "0 0 8px" }}>📐</p>
+            <p style={{ fontWeight: 600, fontSize: 15, color: "var(--text-primary)", margin: "0 0 6px" }}>
+              No room scan yet
+            </p>
+            <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px", lineHeight: 1.4 }}>
+              Use the LiDAR scanner to capture this room's layout. You'll be able to see walls, doors, furniture, and place your inventory items on the floor plan.
+            </p>
+            <a
+              href="/floorplan"
+              style={{
+                display: "inline-block", padding: "10px 20px", border: "none", borderRadius: 8,
+                background: "var(--accent, #3b82f6)", color: "#fff",
+                fontSize: 14, fontWeight: 600, cursor: "pointer", textDecoration: "none",
+              }}
+            >
+              Go to Floorplan Scanner
+            </a>
+          </div>
+        )}
+      </section>
 
       <section>
         <div className="section-heading-row">
@@ -1195,7 +1689,7 @@ export function RoomDetailView({
 
         <div className="inventory-toolbar">
           <p className="inventory-toolbar__summary">
-            {items.length} item{items.length === 1 ? "" : "s"} | {scannedItemCount} scanned
+            {remainingItemCount} of {items.length} item{items.length === 1 ? "" : "s"} | {scannedItemCount} scanned
           </p>
           {scannedItemCount > 0 && (
             <div className="inventory-toolbar__actions">
@@ -1311,9 +1805,21 @@ export function RoomDetailView({
                 confirming={confirming}
                 comparables={comparables[item.id] ?? []}
                 identifyError={identifyError === item.id}
+                identifyErrorMsg={identifyError === item.id ? (identifyErrorMsg ?? undefined) : undefined}
+                identifyWarning={identifyWarning === item.id}
                 pricingError={pricingError === item.id}
                 collapseSignal={collapseScannedSignal}
                 expandSignal={expandScannedSignal}
+                onFullAnalysis={handleFullAnalysis}
+                analyzing={analyzingId === item.id}
+                analysisStep={analyzingId === item.id ? analysisStep : null}
+                decision={decisions[item.id] ?? null}
+                onCorrectAndReprice={handleCorrectAndReprice}
+                correcting={correctingId === item.id}
+                correctError={correctErrorByItem[item.id] ?? null}
+                onMarkAction={handleMarkAction}
+                actioning={actionBusyId === item.id}
+                actionError={actionErrorByItem[item.id] ?? null}
               />
             ))}
           </div>
