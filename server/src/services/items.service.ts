@@ -335,7 +335,7 @@ export async function updateItemSoldPrice(
 const ACTION_MAP: Record<ItemDecisionAction, { recommendation: string; status: string; keepFlag: boolean }> = {
   sell:      { recommendation: "SELL_NOW", status: "LISTED",    keepFlag: false },
   keep:      { recommendation: "KEEP",     status: "KEPT",      keepFlag: true  },
-  ship:      { recommendation: "SHIP",     status: "REVIEWED",  keepFlag: false },
+  ship:      { recommendation: "SHIP",     status: "SHIPPED",   keepFlag: false },
   donate:    { recommendation: "DONATE",   status: "DONATED",   keepFlag: false },
   sold:      { recommendation: "COMPLETE", status: "SOLD",      keepFlag: false },
   discarded: { recommendation: "DISCARD",  status: "DISCARDED", keepFlag: false },
