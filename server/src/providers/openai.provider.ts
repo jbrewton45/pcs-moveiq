@@ -38,6 +38,8 @@ export interface IdentificationOutput {
   reasoning: string;
   isSpecialty?: boolean;
   clarifications?: ClarificationQuestion[];
+  likelyModelOptions?: string[] | null;
+  requiresModelSelection?: boolean;
 }
 
 export interface PricingInput {
@@ -168,6 +170,26 @@ Specialty/high-value item detection: cameras (DSLRs, mirrorless), musical instru
 
 Clarification questions: Generate 1-3 questions ONLY when a missing fact would materially change pricing by more than 20%. For example: asking if a camera lens is included, or if there is major cosmetic damage. Do NOT ask clarifying questions for common household items where condition already covers the key pricing factors.
 
+### Model disambiguation (NEW — likelyModelOptions + requiresModelSelection)
+
+Set \`requiresModelSelection: true\` ONLY when ALL three hold:
+1. identifiedBrand is present and specific.
+2. identifiedName describes a recognizable product family (e.g. contains "case", "impact driver", "drill", "circular saw", "fan", "headphones", "blender", "stand mixer", "vacuum", "speaker", "monitor").
+3. identifiedModel is null OR is a generic family token (e.g. "Air", "Pro", "Elite"), NOT a specific SKU.
+
+When \`requiresModelSelection: true\`, also return \`likelyModelOptions\` as 3-6 likely specific model strings from the brand's product line, PLUS the literal string "Other" appended LAST. Use short model numbers when possible (e.g. "1535", not "Pelican Air 1535 Wheeled Hard Case"). "Other" must never appear first.
+
+When in doubt, return \`requiresModelSelection: false\` and omit/empty the list. Do NOT fabricate models.
+
+Examples:
+- Pelican Air hard case -> likelyModelOptions: ["1535","1595","1607","1615","1637","Other"], requiresModelSelection: true
+- DeWalt 20V MAX impact driver -> ["DCF787","DCF809","DCF850","DCF845","Other"], true
+- Sony over-ear noise-cancelling headphones -> ["WH-1000XM4","WH-1000XM5","WH-CH720N","Other"], true
+- KitchenAid tilt-head stand mixer -> ["Artisan 5-Qt (KSM150)","Classic (K45SS)","Professional 5 Plus (KV25G0X)","Other"], true
+- Generic office chair, no brand visible -> requiresModelSelection: false, likelyModelOptions: []
+- DeWalt DCF850 (model stamped on tool) -> requiresModelSelection: false (model is already specific)
+- Generic wooden dining table -> requiresModelSelection: false
+
 Return a JSON object with these exact fields and no other text:
 {
   "identifiedName": "specific name of the item (never a forbidden placeholder)",
@@ -184,7 +206,9 @@ Return a JSON object with these exact fields and no other text:
       "inputType": "boolean" or "text" or "select",
       "options": ["Option A", "Option B"] or null
     }
-  ]
+  ],
+  "likelyModelOptions": ["ModelA","ModelB","Other"] or null,
+  "requiresModelSelection": true or false
 }
 
 Return ONLY the JSON object. No prose, no markdown fences.`,
@@ -227,6 +251,53 @@ Return ONLY the JSON object. No prose, no markdown fences.`,
       console.warn(
         `[OpenAI] generic identifiedCategory "${parsed.identifiedCategory}" returned; leaving as-is for downstream quality gating (Workstream C).`,
       );
+    }
+
+    // Normalize likelyModelOptions / requiresModelSelection (Workstream K).
+    if (Array.isArray(parsed.likelyModelOptions)) {
+      // De-duplicate (case-insensitive), preserve order, cap at 6.
+      const seen = new Set<string>();
+      const deduped: string[] = [];
+      for (const opt of parsed.likelyModelOptions) {
+        const t = typeof opt === "string" ? opt.trim() : "";
+        if (!t) continue;
+        const key = t.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        deduped.push(t);
+        if (deduped.length >= 6) break;
+      }
+      // Ensure "Other" is last when requiresModelSelection is true.
+      const otherIdx = deduped.findIndex(s => s.toLowerCase() === "other");
+      if (parsed.requiresModelSelection) {
+        if (otherIdx >= 0 && otherIdx !== deduped.length - 1) {
+          const [other] = deduped.splice(otherIdx, 1);
+          deduped.push(other);
+        } else if (otherIdx < 0) {
+          // Always ensure an "Other" escape hatch. If full, drop the last
+          // specific candidate to make room.
+          if (deduped.length >= 6) deduped.pop();
+          deduped.push("Other");
+        }
+      }
+      parsed.likelyModelOptions = deduped.length ? deduped : null;
+    } else {
+      parsed.likelyModelOptions = null;
+    }
+
+    // Coerce requiresModelSelection=false if fewer than 2 options, or if specific model is already identified.
+    const specificModelSet =
+      typeof parsed.identifiedModel === "string" &&
+      parsed.identifiedModel.trim().length > 0 &&
+      // If the identified model exactly matches one of the options, disambiguation is resolved.
+      (parsed.likelyModelOptions?.some(o => o.trim().toLowerCase() === parsed.identifiedModel!.trim().toLowerCase()) ?? false);
+
+    if (
+      parsed.requiresModelSelection &&
+      ((parsed.likelyModelOptions?.length ?? 0) < 2 || specificModelSet)
+    ) {
+      parsed.requiresModelSelection = false;
+      if ((parsed.likelyModelOptions?.length ?? 0) < 2) parsed.likelyModelOptions = null;
     }
 
     return parsed;

@@ -215,6 +215,8 @@ export interface Item {
   identifiedCategory?: string;
   identifiedBrand?: string;
   identifiedModel?: string;
+  likelyModelOptions?: string[] | null;
+  requiresModelSelection?: boolean;
   identificationConfidence?: number;
   identificationReasoning?: string;
   identificationStatus: IdentificationStatus;

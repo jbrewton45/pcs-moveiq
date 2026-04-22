@@ -89,6 +89,8 @@ export async function initializeSchema() {
       "identifiedCategory" TEXT,
       "identifiedBrand" TEXT,
       "identifiedModel" TEXT,
+      "likelyModelOptions"      TEXT,
+      "requiresModelSelection"  BOOLEAN NOT NULL DEFAULT FALSE,
       "identificationConfidence" DOUBLE PRECISION,
       "identificationReasoning" TEXT,
       "identificationStatus" TEXT DEFAULT 'NONE',
@@ -206,5 +208,11 @@ export async function initializeSchema() {
     -- (SOLD, DONATED, SHIPPED, DISCARDED). Existing terminal-status rows
     -- keep completedAt = NULL — no backfill is performed.
     ALTER TABLE items ADD COLUMN IF NOT EXISTS "completedAt" TEXT;
+
+    -- Workstream L: model disambiguation fields. likelyModelOptions stores a
+    -- JSON-encoded string[] of candidate model names returned by the provider.
+    -- requiresModelSelection signals the frontend to prompt the user to pick.
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "likelyModelOptions"     TEXT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "requiresModelSelection" BOOLEAN NOT NULL DEFAULT FALSE;
   `);
 }

@@ -25,6 +25,8 @@ const ProviderOutputSchema = z.object({
   reasoning: z.string().min(1),
   isSpecialty: z.boolean().optional().default(false),
   clarifications: z.array(ClarificationSchema).optional().default([]),
+  likelyModelOptions: z.array(z.string().min(1)).max(6).nullable().optional(),
+  requiresModelSelection: z.boolean().optional().default(false),
 });
 
 type ValidatedOutput = z.infer<typeof ProviderOutputSchema>;
@@ -64,6 +66,8 @@ function mockIdentify(item: Item, reason: string): IdentificationResult {
     reasoning: reason,
     isSpecialty: false,
     clarifications: [],
+    likelyModelOptions: null,
+    requiresModelSelection: false,
     provider: "mock",
   };
 }
@@ -140,13 +144,19 @@ export async function identifyItem(itemId: string): Promise<IdentifyResult | nul
       ? JSON.stringify(identResult.clarifications)
       : null;
 
+  const likelyJson = identResult.likelyModelOptions && identResult.likelyModelOptions.length > 0
+    ? JSON.stringify(identResult.likelyModelOptions)
+    : null;
+  const requiresSel = !!identResult.requiresModelSelection;
+
   await query(
     `UPDATE items SET
       "identifiedName" = $1, "identifiedCategory" = $2, "identifiedBrand" = $3, "identifiedModel" = $4,
       "identificationConfidence" = $5, "identificationReasoning" = $6, "identificationStatus" = $7,
       "pendingClarifications" = $8, "identificationQuality" = $9, "pricingEligible" = $10,
-      "updatedAt" = $11
-     WHERE id = $12`,
+      "likelyModelOptions" = $11, "requiresModelSelection" = $12,
+      "updatedAt" = $13
+     WHERE id = $14`,
     [
       identResult.identifiedName,
       identResult.identifiedCategory,
@@ -158,6 +168,8 @@ export async function identifyItem(itemId: string): Promise<IdentifyResult | nul
       pendingClarificationsJson,
       identificationQuality,
       pricingEligible,
+      likelyJson,
+      requiresSel,
       now,
       itemId,
     ]
@@ -206,6 +218,8 @@ export async function confirmIdentification(itemId: string, edits?: {
         "identificationStatus" = $5,
         "identificationQuality" = $6,
         "pricingEligible" = $7,
+        "likelyModelOptions" = NULL,
+        "requiresModelSelection" = FALSE,
         "updatedAt" = $8
        WHERE id = $9`,
       [
@@ -226,6 +240,8 @@ export async function confirmIdentification(itemId: string, edits?: {
         "identificationStatus" = $1,
         "identificationQuality" = $2,
         "pricingEligible" = $3,
+        "likelyModelOptions" = NULL,
+        "requiresModelSelection" = FALSE,
         "updatedAt" = $4
        WHERE id = $5`,
       [status, confirmedQuality, confirmedPricingEligible, now, itemId]

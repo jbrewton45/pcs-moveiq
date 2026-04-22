@@ -42,6 +42,8 @@ export async function correctAndReprice(
          "pricingSuggestedChannel" = NULL,
          "pricingSaleSpeedBand" = NULL,
          "pricingLastUpdatedAt" = NULL,
+         "likelyModelOptions" = NULL,
+         "requiresModelSelection" = FALSE,
          "updatedAt" = $1
        WHERE id = $2`,
       [now, itemId],

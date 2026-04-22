@@ -13,6 +13,17 @@ export function rowToItem(row: Record<string, unknown>): Item {
     identifiedCategory: (row.identifiedCategory as string | null) ?? undefined,
     identifiedBrand: (row.identifiedBrand as string | null) ?? undefined,
     identifiedModel: (row.identifiedModel as string | null) ?? undefined,
+    likelyModelOptions: (() => {
+      const raw = row.likelyModelOptions;
+      if (raw == null) return null;
+      if (Array.isArray(raw)) return raw as string[];
+      if (typeof raw === "string") {
+        try { const p = JSON.parse(raw); return Array.isArray(p) ? p : null; }
+        catch { return null; }
+      }
+      return null;
+    })(),
+    requiresModelSelection: !!row.requiresModelSelection,
     identificationConfidence: (row.identificationConfidence as number | null) ?? undefined,
     identificationReasoning: (row.identificationReasoning as string | null) ?? undefined,
     identificationStatus: ((row.identificationStatus as string | null) ?? "NONE") as Item["identificationStatus"],

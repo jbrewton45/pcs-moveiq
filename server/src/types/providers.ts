@@ -38,4 +38,6 @@ export interface IdentificationOutput {
   isSpecialty?: boolean;
   clarifications?: ClarificationQuestion[];
   identificationQuality?: "STRONG" | "MEDIUM" | "WEAK";
+  likelyModelOptions?: string[] | null;
+  requiresModelSelection?: boolean;
 }

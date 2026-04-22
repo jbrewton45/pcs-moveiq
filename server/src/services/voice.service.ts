@@ -57,7 +57,10 @@ export async function parseVoiceWithPhoto(
   photoFilename: string,
   roomType?: string,
 ): Promise<ParsedVoiceItem> {
-  const prompt = buildParsePromptWithPhoto(transcript, roomType);
+  const isPhotoOnly = !transcript || transcript.trim().length === 0;
+  const prompt = isPhotoOnly
+    ? buildParsePromptPhotoOnly(roomType)
+    : buildParsePromptWithPhoto(transcript, roomType);
 
   // Try vision-capable models: Claude first, then OpenAI
   if (isClaudeAvailable()) {
@@ -69,8 +72,51 @@ export async function parseVoiceWithPhoto(
     if (result) return result;
   }
 
-  // Fallback to text-only parse
+  // If photo-only, don't fall through to text-only parse (empty transcript
+  // would yield an empty itemName). Return a minimal safe default instead.
+  if (isPhotoOnly) {
+    return {
+      itemName: "Unknown item",
+      category: guessCategoryFromRoom(roomType),
+      condition: "GOOD",
+      sizeClass: "MEDIUM",
+      notes: "",
+      willingToSell: true,
+      keepFlag: false,
+      sentimentalFlag: false,
+    };
+  }
+
+  // Fallback to text-only parse (voice+photo with non-empty transcript)
   return parseVoiceTranscript(transcript, roomType);
+}
+
+function buildParsePromptPhotoOnly(roomType?: string): string {
+  return `Identify the item in the provided PHOTO for a military PCS move inventory. No spoken description is available — rely on the image alone.
+
+${roomType ? `Room: ${roomType}` : ""}
+
+Return a JSON object:
+{
+  "itemName": "concise item name (e.g. 'Sony A7R III Camera Body')",
+  "category": "one of: Furniture, Electronics, Appliance, Keepsake, Media, Linens, Decor, Tools, Sports, Clothing, Other",
+  "condition": "one of: NEW, LIKE_NEW, GOOD, FAIR, POOR",
+  "sizeClass": "one of: SMALL, MEDIUM, LARGE, OVERSIZED",
+  "notes": "any extra details visible in the photo (accessories, bundles, visible damage, configuration details, etc.)",
+  "willingToSell": true or false (default true — no spoken intent to infer from),
+  "keepFlag": true or false (default false — no spoken intent to infer from),
+  "sentimentalFlag": true or false (default false — no spoken intent to infer from)
+}
+
+Rules:
+- Identify the item from the PHOTO ALONE — there is no transcript to reference
+- Extract the most specific item name possible — include brand and model when visible in the photo
+- If the brand/model is not clearly visible, use a descriptive generic name (e.g. 'Black leather recliner', 'Stainless steel microwave')
+- Assess condition from visual evidence: visible scratches, wear marks, or damage should lower condition from GOOD; pristine items can be LIKE_NEW or NEW
+- Size: SMALL (fits in a box), MEDIUM (chair-sized), LARGE (couch/desk), OVERSIZED (piano/treadmill)
+- Notes should capture accessory/bundle info visible in the photo: "with lens", "includes case", "body only", etc.
+- willingToSell defaults to true; keepFlag and sentimentalFlag default to false (no user speech to infer intent)
+- Return ONLY the JSON object`;
 }
 
 function buildParsePrompt(transcript: string, roomType?: string): string {

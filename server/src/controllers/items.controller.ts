@@ -190,21 +190,26 @@ export async function parseVoice(req: Request, res: Response) {
 }
 
 export async function parseVoicePhoto(req: Request, res: Response) {
-  const transcript = req.body?.transcript as string | undefined;
-  if (!transcript || typeof transcript !== "string" || transcript.trim().length === 0) {
-    return res.status(400).json({ error: "transcript is required" });
-  }
+  const transcriptRaw = req.body?.transcript;
+  const transcript = typeof transcriptRaw === "string" ? transcriptRaw : undefined;
   const roomType = req.body?.roomType as string | undefined;
 
   const file = (req as unknown as { file?: { filename: string } }).file;
+
+  const hasTranscript = typeof transcript === "string" && transcript.trim().length > 0;
+
+  if (!hasTranscript && !file) {
+    return res.status(400).json({ error: "transcript or photo is required" });
+  }
+
   if (file) {
-    const result = await parseVoiceWithPhoto(transcript.trim(), file.filename, roomType);
+    const result = await parseVoiceWithPhoto(hasTranscript ? transcript!.trim() : "", file.filename, roomType);
     const filePath = path.join(process.cwd(), "uploads", file.filename);
     fs.unlink(filePath, () => {});
     return res.status(200).json(result);
   }
 
-  const result = await parseVoiceTranscript(transcript.trim(), roomType);
+  const result = await parseVoiceTranscript(transcript!.trim(), roomType);
   return res.status(200).json(result);
 }
 
