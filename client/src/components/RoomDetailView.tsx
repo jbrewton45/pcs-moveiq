@@ -246,7 +246,7 @@ interface MarkDonePopoverProps {
   item: Item;
   actioning: boolean;
   errorMsg: string | null;
-  onMarkAction: (itemId: string, action: "sold" | "donate" | "discarded" | "shipped", finalPrice?: number) => Promise<boolean>;
+  onMarkAction: (itemId: string, action: "sold" | "donate" | "discarded" | "shipped", soldPriceUsd?: number) => Promise<boolean>;
 }
 
 function MarkDonePopover({ item, actioning, errorMsg, onMarkAction }: MarkDonePopoverProps) {
@@ -392,7 +392,7 @@ interface ItemReadCardProps {
   }) => Promise<boolean>;
   correcting: boolean;
   correctError: string | null;
-  onMarkAction: (itemId: string, action: "sold" | "donate" | "discarded" | "shipped", finalPrice?: number) => Promise<boolean>;
+  onMarkAction: (itemId: string, action: "sold" | "donate" | "discarded" | "shipped", soldPriceUsd?: number) => Promise<boolean>;
   actioning: boolean;
   actionError: string | null;
 }
@@ -1512,12 +1512,12 @@ export function RoomDetailView({
   async function handleMarkAction(
     itemId: string,
     action: "sold" | "donate" | "discarded" | "shipped",
-    finalPrice?: number,
+    soldPriceUsd?: number,
   ): Promise<boolean> {
     setActionBusyId(itemId);
     setActionErrorByItem(prev => { const n = { ...prev }; delete n[itemId]; return n; });
     try {
-      const updated = await api.markItemAction(itemId, action, { finalPrice });
+      const updated = await api.applyItemAction(itemId, action, soldPriceUsd !== undefined ? { soldPriceUsd } : {});
       setItems(prev => prev.map(i => (i.id === itemId ? updated : i)));
       return true;
     } catch (err) {

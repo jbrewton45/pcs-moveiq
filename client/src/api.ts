@@ -248,20 +248,6 @@ export const api = {
       ),
     }),
 
-  markItemAction: (
-    itemId: string,
-    action: "sold" | "donate" | "discarded" | "shipped",
-    opts: { finalPrice?: number } = {},
-  ) =>
-    request<Item>(`/items/${itemId}/action`, {
-      method: "POST",
-      body: JSON.stringify(
-        action === "sold" && opts.finalPrice !== undefined
-          ? { action, soldPriceUsd: opts.finalPrice }
-          : { action },
-      ),
-    }),
-
   applyBulkItemAction: (itemIds: string[], action: ItemDecisionAction) =>
     request<{ updated: number; items: Item[] }>(`/items/bulk-action`, {
       method: "POST",
