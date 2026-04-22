@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { bulkDeleteItemsHandler, bulkUpdateItemStatus, getItems, getPrioritizedHandler, postBulkItemActionHandler, postItem, postItemActionHandler, putItem, putItemListingHandler, putItemPlacementHandler, putItemSoldPriceHandler, removeItem, submitClarificationsHandler, parseVoice, parseVoicePhoto, batchIdentifyPrice } from "../controllers/items.controller.js";
+import { bulkDeleteItemsHandler, getItems, getPrioritizedHandler, postBulkItemActionHandler, postItem, postItemActionHandler, putItem, putItemListingHandler, putItemPlacementHandler, putItemSoldPriceHandler, removeItem, submitClarificationsHandler, parseVoice, parseVoicePhoto, batchIdentifyPrice } from "../controllers/items.controller.js";
 import { deleteAdditionalPhoto, deletePhoto, listPhotos, setAdditionalPhotoPrimary, upload, uploadAdditionalPhoto, uploadPhoto } from "../controllers/photos.controller.js";
 import { postIdentify, postConfirmIdentification, postPricing, getComparables, postCorrectAndReprice } from "../controllers/identification.controller.js";
 
@@ -7,7 +7,11 @@ export const itemsRouter = Router();
 
 itemsRouter.get("/prioritized", getPrioritizedHandler);
 itemsRouter.get("/", getItems);
-itemsRouter.post("/bulk-update", bulkUpdateItemStatus);
+itemsRouter.post("/bulk-update", (_req, res) => {
+  res.status(410).json({
+    error: "Endpoint retired. Use POST /items/bulk-action with an action in {sell,keep,ship,donate,sold,discarded,shipped}.",
+  });
+});
 itemsRouter.post("/bulk-delete", bulkDeleteItemsHandler);
 itemsRouter.post("/bulk-action", postBulkItemActionHandler);
 itemsRouter.post("/batch-identify-price", batchIdentifyPrice);

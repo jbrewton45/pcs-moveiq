@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Item, ItemCondition, ItemStatus, SizeClass, Recommendation, Comparable, ComparableSource, ClarificationQuestion, RoomScan, ItemDecisionResult } from "../types";
+import type { Item, ItemCondition, SizeClass, Recommendation, Comparable, ComparableSource, ClarificationQuestion, RoomScan, ItemDecisionResult, DecisionBucket, ItemDecisionAction } from "../types";
 import { isCompleted } from "../types";
 import { api, getUploadUrl } from "../api";
 import { CompletionStats } from "./CompletionStats";
@@ -15,7 +15,20 @@ function label(s: string) {
 
 const CONDITIONS: ItemCondition[] = ["NEW", "LIKE_NEW", "GOOD", "FAIR", "POOR"];
 const SIZE_CLASSES: SizeClass[] = ["SMALL", "MEDIUM", "LARGE", "OVERSIZED"];
-const STATUS_OPTIONS: ItemStatus[] = ["UNREVIEWED", "REVIEWED", "LISTED", "SOLD", "DONATED", "STORED", "SHIPPED", "DISCARDED", "KEPT"];
+
+const BULK_ACTION_BUCKETS: DecisionBucket[] = ["sell", "keep", "ship", "donate"];
+const BULK_ACTION_COLOR: Record<DecisionBucket, string> = {
+  sell: "#ef4444",
+  keep: "#22c55e",
+  ship: "#3b82f6",
+  donate: "#eab308",
+};
+const BULK_ACTION_LABEL: Record<DecisionBucket, string> = {
+  sell: "Sell",
+  keep: "Keep",
+  ship: "Ship",
+  donate: "Donate",
+};
 
 const REC_BADGE_TEXT: Record<Recommendation, string> = {
   SELL_NOW: "Sell Now",
@@ -1187,7 +1200,8 @@ export function RoomDetailView({
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [showBulkSheet, setShowBulkSheet] = useState(false);
-  const [bulkStatus, setBulkStatus] = useState<ItemStatus>("REVIEWED");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [confirmDeleteItem, setConfirmDeleteItem] = useState<Item | null>(null);
 
@@ -1395,12 +1409,21 @@ export function RoomDetailView({
     }
   }
 
-  async function handleBulkStatusUpdate(status: ItemStatus) {
-    await api.bulkUpdateStatus(Array.from(selectedIds), status);
-    setSelectedIds(new Set());
-    setSelectMode(false);
-    setShowBulkSheet(false);
-    setRefreshKey((k) => k + 1);
+  async function handleBulkAction(action: ItemDecisionAction) {
+    if (selectedIds.size === 0) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    try {
+      await api.applyBulkItemAction(Array.from(selectedIds), action);
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      setShowBulkSheet(false);
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setBulkError(err instanceof Error ? err.message : "Bulk action failed");
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   async function handleBulkDelete() {
@@ -2013,24 +2036,46 @@ export function RoomDetailView({
 
       <BottomSheet open={showBulkSheet} onClose={() => setShowBulkSheet(false)} title="Bulk Actions">
         <div className="bulk-sheet__group">
-          <label>
-            Update Status
-            <select
-              className="bulk-sheet__status"
-              value={bulkStatus}
-              onChange={(e) => setBulkStatus(e.target.value as ItemStatus)}
-            >
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>{label(s)}</option>
-              ))}
-            </select>
-          </label>
+          <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 8 }}>
+            Apply one action to {selectedIds.size} selected item{selectedIds.size === 1 ? "" : "s"}.
+          </div>
+          <div
+            role="toolbar"
+            aria-label="Bulk item actions"
+            style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 12 }}
+          >
+            {BULK_ACTION_BUCKETS.map((a) => {
+              const color = BULK_ACTION_COLOR[a];
+              return (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => void handleBulkAction(a)}
+                  disabled={bulkBusy || selectedIds.size === 0}
+                  style={{
+                    padding: "10px 6px",
+                    border: `1px solid ${color}40`,
+                    borderRadius: 8,
+                    background: `${color}14`,
+                    color,
+                    fontSize: 13,
+                    fontWeight: 800,
+                    textAlign: "center",
+                    cursor: bulkBusy || selectedIds.size === 0 ? "default" : "pointer",
+                    opacity: bulkBusy || selectedIds.size === 0 ? 0.5 : 1,
+                  }}
+                >
+                  {bulkBusy ? "…" : BULK_ACTION_LABEL[a]}
+                </button>
+              );
+            })}
+          </div>
+          {bulkError && (
+            <div className="error-text" style={{ marginBottom: 8 }}>{bulkError}</div>
+          )}
           <div className="sheet__actions">
             <button type="button" className="sheet__btn sheet__btn--secondary" onClick={() => setShowBulkSheet(false)}>
               Cancel
-            </button>
-            <button type="button" className="sheet__btn sheet__btn--primary" onClick={() => void handleBulkStatusUpdate(bulkStatus)}>
-              Apply Status
             </button>
           </div>
           <button type="button" className="item-delete-btn" onClick={() => setConfirmBulkDelete(true)}>

@@ -283,9 +283,6 @@ export const api = {
   getCalibration: (projectId: string) =>
     request<CategoryCalibration[]>(`/calibration?projectId=${encodeURIComponent(projectId)}`),
 
-  bulkUpdateStatus: (itemIds: string[], status: string) =>
-    request<{ updated: number }>("/items/bulk-update", { method: "POST", body: JSON.stringify({ itemIds, status }) }),
-
   bulkDeleteItems: (itemIds: string[]) =>
     request<{ deleted: number }>("/items/bulk-delete", { method: "POST", body: JSON.stringify({ itemIds }) }),
 
