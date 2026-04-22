@@ -8,6 +8,7 @@ import { BottomSheet } from "./ui/BottomSheet";
 import { ConfirmSheet } from "./ui/ConfirmSheet";
 import { RoomViewer } from "./RoomViewer";
 import { IdentificationCorrectionForm } from "./IdentificationCorrectionForm";
+import { ModelSelectionPrompt } from "./ModelSelectionPrompt";
 
 function label(s: string) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -422,6 +423,11 @@ function ItemReadCard({
   const isWeak = quality === "WEAK";
   const isMedium = quality === "MEDIUM";
   const isItemCompleted_ = isCompleted(item);
+  const showModelPrompt =
+    !isWeak &&
+    !isItemCompleted_ &&
+    !!item.requiresModelSelection &&
+    (item.likelyModelOptions?.length ?? 0) >= 2;
   const scannedItem = isScannedItem(item);
   const [expanded, setExpanded] = useState(!scannedItem);
   const [showComparables, setShowComparables] = useState(false);
@@ -524,7 +530,7 @@ function ItemReadCard({
           <span className={`item-summary-chip item-summary-chip--${item.identificationStatus.toLowerCase()}`}>
             {item.identificationStatus === "NONE" ? "Needs ID" : item.identificationStatus === "SUGGESTED" ? "Review ID" : "Identified"}
           </span>
-          {hasPricing && (
+          {hasPricing && !showModelPrompt && (
             <span className="item-summary-chip item-summary-chip--pricing">
               {item.priceFairMarket != null ? `FMV $${item.priceFairMarket}` : "Pricing notes"}
             </span>
@@ -707,7 +713,24 @@ function ItemReadCard({
               </div>
             )}
 
-            {!isWeak && (item.priceFairMarket != null ? (
+            {showModelPrompt && (
+              <ModelSelectionPrompt
+                options={item.likelyModelOptions ?? []}
+                busy={correcting}
+                errorMsg={correctError}
+                itemLabelHint={item.identifiedName ?? undefined}
+                onSubmit={(chosen) => {
+                  onCorrectAndReprice(item.id, {
+                    identifiedName: item.identifiedName ?? item.itemName,
+                    identifiedCategory: item.identifiedCategory ?? item.category,
+                    identifiedBrand: item.identifiedBrand ?? null,
+                    identifiedModel: chosen,
+                  });
+                }}
+              />
+            )}
+
+            {!isWeak && !showModelPrompt && (item.priceFairMarket != null ? (
               <div className="item-card__pricing">
                 <div className="pricing-bands">
                   <div className="pricing-band">
@@ -750,7 +773,7 @@ function ItemReadCard({
               </div>
             ) : null)}
 
-            {comparables.length > 0 && (
+            {comparables.length > 0 && !showModelPrompt && (
               <div className="comp-list">
                 <button
                   type="button"
@@ -836,7 +859,7 @@ function ItemReadCard({
           />
         )}
 
-        <DecisionCard decision={decision} analysisStep={analyzing ? analysisStep : null} />
+        {!showModelPrompt && <DecisionCard decision={decision} analysisStep={analyzing ? analysisStep : null} />}
       </div>
     </div>
   );
