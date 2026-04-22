@@ -7,8 +7,7 @@ import { VoiceCapture } from "./VoiceCapture";
 import { BottomSheet } from "./ui/BottomSheet";
 import { ConfirmSheet } from "./ui/ConfirmSheet";
 import { RoomViewer } from "./RoomViewer";
-import { IdentificationCorrectionForm } from "./IdentificationCorrectionForm";
-import { ModelSelectionPrompt } from "./ModelSelectionPrompt";
+import { FixItemPanel } from "./FixItemPanel";
 
 function label(s: string) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -418,7 +417,6 @@ function ItemReadCard({
 }: ItemReadCardProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submittingClarifications, setSubmittingClarifications] = useState(false);
-  const [showMediumRefine, setShowMediumRefine] = useState(false);
   const quality = item.identificationQuality ?? "STRONG";
   const isWeak = quality === "WEAK";
   const isMedium = quality === "MEDIUM";
@@ -573,57 +571,8 @@ function ItemReadCard({
 
             {item.identificationStatus !== "NONE" && (
               <div className="item-card__identification">
-                {!isItemCompleted_ && isWeak && item.identificationStatus === "SUGGESTED" ? (
-                  <IdentificationCorrectionForm
-                    variant="weak"
-                    item={item}
-                    submitting={correcting}
-                    errorMsg={correctError}
-                    onSubmit={(edits) => onCorrectAndReprice(item.id, edits)}
-                  />
-                ) : isMedium && item.identificationStatus === "SUGGESTED" ? (
-                  <>
-                    <div className="id-header">
-                      <span className={`id-status-badge id-status-badge--${item.identificationStatus.toLowerCase()}`}>
-                        AI Suggested
-                      </span>
-                      <ConfidenceDots value={item.identificationConfidence ?? 0} />
-                    </div>
-                    <p className="id-details">
-                      <strong>{item.identifiedName}</strong>
-                      {item.identifiedBrand && <span> by {item.identifiedBrand}</span>}
-                      {item.identifiedModel && <span> ({item.identifiedModel})</span>}
-                    </p>
-                    {item.identificationReasoning && <p className="id-reasoning">{cleanReasoning(item.identificationReasoning)}</p>}
-                    <ProviderBadge reasoning={item.identificationReasoning} />
-                    <div className="id-confirm-actions">
-                      <button className="btn-confirm" disabled={confirming} onClick={() => onConfirm(item.id)}>
-                        {confirming ? "..." : "Confirm"}
-                      </button>
-                      <button className="btn-edit-id" onClick={() => onEdit(item.id)}>Edit</button>
-                      <button
-                        type="button"
-                        className="btn-improve-accuracy"
-                        onClick={() => setShowMediumRefine((v) => !v)}
-                      >
-                        {showMediumRefine ? "Cancel refinement" : "Improve accuracy"}
-                      </button>
-                    </div>
-                    {showMediumRefine && (
-                      <IdentificationCorrectionForm
-                        variant="medium"
-                        item={item}
-                        submitting={correcting}
-                        errorMsg={correctError}
-                        onSubmit={async (edits) => {
-                          const ok = await onCorrectAndReprice(item.id, edits);
-                          if (ok) setShowMediumRefine(false);
-                        }}
-                        onCancel={() => setShowMediumRefine(false)}
-                      />
-                    )}
-                  </>
-                ) : (
+                {/* Show identity info except when the WEAK panel is actively the sole surface (WEAK + SUGGESTED + active item) */}
+                {(isItemCompleted_ || !isWeak || item.identificationStatus !== "SUGGESTED") && (
                   <>
                     <div className="id-header">
                       <span className={`id-status-badge id-status-badge--${item.identificationStatus.toLowerCase()}`}>
@@ -638,15 +587,37 @@ function ItemReadCard({
                     </p>
                     {item.identificationReasoning && <p className="id-reasoning">{cleanReasoning(item.identificationReasoning)}</p>}
                     <ProviderBadge reasoning={item.identificationReasoning} />
-                    {item.identificationStatus === "SUGGESTED" && (
-                      <div className="id-confirm-actions">
-                        <button className="btn-confirm" disabled={confirming} onClick={() => onConfirm(item.id)}>
-                          {confirming ? "..." : "Confirm"}
-                        </button>
-                        <button className="btn-edit-id" onClick={() => onEdit(item.id)}>Edit</button>
-                      </div>
-                    )}
                   </>
+                )}
+
+                {/* Single unified correction surface — exactly one mode at a time */}
+                {!isItemCompleted_ && isWeak && item.identificationStatus === "SUGGESTED" && (
+                  <FixItemPanel
+                    item={item}
+                    mode="weak"
+                    submitting={correcting}
+                    errorMsg={correctError}
+                    onSubmit={(edits) => onCorrectAndReprice(item.id, edits)}
+                  />
+                )}
+                {!isItemCompleted_ && !isWeak && showModelPrompt && (
+                  <FixItemPanel
+                    item={item}
+                    mode="model-pick"
+                    modelOptions={item.likelyModelOptions ?? []}
+                    submitting={correcting}
+                    errorMsg={correctError}
+                    onSubmit={(edits) => onCorrectAndReprice(item.id, edits)}
+                  />
+                )}
+                {!isItemCompleted_ && !isWeak && !showModelPrompt && isMedium && item.identificationStatus === "SUGGESTED" && (
+                  <FixItemPanel
+                    item={item}
+                    mode="medium"
+                    submitting={correcting}
+                    errorMsg={correctError}
+                    onSubmit={(edits) => onCorrectAndReprice(item.id, edits)}
+                  />
                 )}
               </div>
             )}
@@ -711,23 +682,6 @@ function ItemReadCard({
                   {submittingClarifications ? "Submitting..." : "Submit & Refresh Pricing"}
                 </button>
               </div>
-            )}
-
-            {showModelPrompt && (
-              <ModelSelectionPrompt
-                options={item.likelyModelOptions ?? []}
-                busy={correcting}
-                errorMsg={correctError}
-                itemLabelHint={item.identifiedName ?? undefined}
-                onSubmit={(chosen) => {
-                  onCorrectAndReprice(item.id, {
-                    identifiedName: item.identifiedName ?? item.itemName,
-                    identifiedCategory: item.identifiedCategory ?? item.category,
-                    identifiedBrand: item.identifiedBrand ?? null,
-                    identifiedModel: chosen,
-                  });
-                }}
-              />
             )}
 
             {!isWeak && !showModelPrompt && (item.priceFairMarket != null ? (
@@ -824,18 +778,10 @@ function ItemReadCard({
 
         {!selectMode && !isItemCompleted_ && (
           <div className="item-card__actions">
-            {(item.identificationStatus === "NONE" || item.identificationStatus === "CONFIRMED" || item.identificationStatus === "EDITED") && (
-              <button className="btn-action-sm" disabled={identifying} onClick={() => onIdentify(item.id)}>
-                {identifying ? "Identifying..." : item.identificationStatus === "NONE" ? "Identify" : "Re-identify"}
-              </button>
-            )}
-            {identifyError && <p className="item-error-text">{identifyErrorMsg || "Could not analyze this item."} <span style={{ textDecoration: "underline", cursor: "pointer" }} onClick={() => onIdentify(item.id)}>Retry</span></p>}
-            {identifyWarning && <p className="item-error-text" style={{ color: "var(--text-muted, #6b7280)" }}>AI provider unavailable — result is an estimate only. Add a photo and retry for better accuracy.</p>}
-            {!isWeak && (
+            {!isWeak && !showModelPrompt && !hasPricing && (
               <>
-                <button className="btn-action-sm" disabled={pricing} onClick={() => onPricing(item.id)}>
-                  {pricing ? "Getting pricing..." : (item.priceFairMarket != null || item.pricingReasoning) ? "Retry Pricing" : "Get Pricing"}
-                </button>
+                {identifyError && <p className="item-error-text">{identifyErrorMsg || "Could not analyze this item."} <span style={{ textDecoration: "underline", cursor: "pointer" }} onClick={() => onFullAnalysis(item.id)}>Retry</span></p>}
+                {identifyWarning && <p className="item-error-text" style={{ color: "var(--text-muted, #6b7280)" }}>AI provider unavailable — result is an estimate only. Add a photo and retry for better accuracy.</p>}
                 {pricingError && <p className="item-error-text">Could not get pricing. Try again later.</p>}
                 <button
                   className="btn-action-sm"
@@ -843,14 +789,14 @@ function ItemReadCard({
                   onClick={() => onFullAnalysis(item.id)}
                   style={{ marginTop: 4, background: "var(--accent, #3b82f6)", color: "#fff", border: "none" }}
                 >
-                  {analyzing ? (analysisStep ?? "Analyzing...") : "Full Analysis"}
+                  {analyzing ? (analysisStep ?? "Analyzing...") : "Analyze Item"}
                 </button>
               </>
             )}
           </div>
         )}
 
-        {!selectMode && !isItemCompleted_ && (
+        {!selectMode && !isItemCompleted_ && hasPricing && (
           <MarkDonePopover
             item={item}
             actioning={actioning}
@@ -859,7 +805,7 @@ function ItemReadCard({
           />
         )}
 
-        {!showModelPrompt && <DecisionCard decision={decision} analysisStep={analyzing ? analysisStep : null} />}
+        {hasPricing && !showModelPrompt && <DecisionCard decision={decision} analysisStep={analyzing ? analysisStep : null} />}
       </div>
     </div>
   );
