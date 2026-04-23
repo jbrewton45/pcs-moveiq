@@ -6,7 +6,7 @@ import { PriorityPanel } from "./PriorityPanel";
 import { RevenueSummary } from "./RevenueSummary";
 import { CalibrationPanel } from "./CalibrationPanel";
 import { ProgressBar } from "./ProgressBar";
-import { DECIDED_STATUSES } from "../lib/progress";
+import { isCompletedItem, itemPrimaryLabel } from "../utils/itemStatus";
 
 function formatDate(iso: string) {
   if (!iso) return "—";
@@ -401,7 +401,7 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
         const reviewed: Record<string, number> = {};
         for (const item of fetchedItems) {
           counts[item.roomId] = (counts[item.roomId] ?? 0) + 1;
-          if (DECIDED_STATUSES.has(item.status)) {
+          if (isCompletedItem(item)) {
             reviewed[item.roomId] = (reviewed[item.roomId] ?? 0) + 1;
           }
         }
@@ -683,7 +683,7 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
   // Compute filter state
   const hasFilters = searchText || filterRec || filterRoom;
   const filteredItems = hasFilters ? allItems.filter(item => {
-    if (searchText && !item.itemName.toLowerCase().includes(searchText.toLowerCase()) && !item.category.toLowerCase().includes(searchText.toLowerCase())) return false;
+    if (searchText && !itemPrimaryLabel(item).label.toLowerCase().includes(searchText.toLowerCase()) && !item.category.toLowerCase().includes(searchText.toLowerCase())) return false;
     if (filterRec && item.recommendation !== filterRec) return false;
     if (filterRoom && item.roomId !== filterRoom) return false;
     return true;
@@ -791,7 +791,7 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
                 return (
                   <div key={item.id} className="item-card">
                     <div className="item-card__header">
-                      <span className="item-card__name">{item.itemName}</span>
+                      <span className="item-card__name">{itemPrimaryLabel(item).label}</span>
                       <span className={`rec-badge rec-badge--${item.recommendation.toLowerCase().replace("_", "-")}`}>
                         {label(item.recommendation)}
                       </span>

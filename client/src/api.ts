@@ -1,3 +1,8 @@
+// Legacy boolean flags (keepFlag, willingToSell, sentimentalFlag) and the
+// "Scanned Item" placeholder are accepted by the backend during the Phase 3
+// dual-write window. Prefer api.applyItemAction(itemId, intent) for intent
+// changes. No additional code should be added that writes these flags.
+
 import type { Project, Room, Item, Comparable, ProjectWorkspace, UserPublic, EbayAnalysisResult, SellPriorityResult, RoomScanData, RoomScan, ItemPlacementInput, OrphanedItem, PrioritizedItem, ItemDecisionAction, CategoryCalibration, EbaySoldResult, ItemDecisionResult } from "./types";
 import { Capacitor } from "@capacitor/core";
 

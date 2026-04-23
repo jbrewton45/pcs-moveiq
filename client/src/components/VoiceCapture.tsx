@@ -28,7 +28,7 @@ interface SpeechRecognition extends EventTarget {
 }
 
 import { useEffect, useRef, useState } from "react";
-import type { ItemCondition, SizeClass } from "../types";
+import type { ItemCondition, ItemDecisionAction, SizeClass } from "../types";
 import { api } from "../api";
 
 interface VoiceCaptureProps {
@@ -244,6 +244,9 @@ export function VoiceCapture({
     setSaving(true);
     setSaveError("");
     try {
+      // Translate draft booleans: sentimentalFlag → prepend to notes; intent flags → applyItemAction post-create.
+      const sentimentalPrefix = draft.sentimentalFlag ? "[Sentimental] " : "";
+      const notesWithSentimental = sentimentalPrefix + (draft.notes || "");
       const item = await api.createItem({
         projectId,
         roomId,
@@ -251,11 +254,17 @@ export function VoiceCapture({
         category: draft.category,
         condition: draft.condition,
         sizeClass: draft.sizeClass,
-        notes: draft.notes || undefined,
-        willingToSell: draft.willingToSell,
-        keepFlag: draft.keepFlag,
-        sentimentalFlag: draft.sentimentalFlag,
+        notes: notesWithSentimental.trim() || undefined,
+        sentimentalFlag: false,
+        keepFlag: false,
+        willingToSell: false,
       });
+      // Post-create intent actions — keepFlag takes priority over willingToSell.
+      if (draft.keepFlag) {
+        await api.applyItemAction(item.id, "keep" as ItemDecisionAction);
+      } else if (draft.willingToSell) {
+        await api.applyItemAction(item.id, "sell" as ItemDecisionAction);
+      }
       // Upload photo if captured
       if (photoFile && item.id) {
         try { await api.uploadItemPhoto(item.id, photoFile); } catch { /* photo upload failed, item still saved */ }
@@ -476,42 +485,6 @@ export function VoiceCapture({
             style={{ display: "block", width: "100%", marginTop: "0.25rem", padding: "0.5rem", fontSize: "1rem", fontFamily: "inherit", border: "1px solid var(--color-border, #ccc)", borderRadius: "0.375rem", background: "var(--color-bg, #fff)", color: "inherit", boxSizing: "border-box", resize: "vertical", minHeight: "2.5rem" }}
           />
         </label>
-
-        <div className="checkbox-row">
-          <input
-            id="voice-sentimental"
-            type="checkbox"
-            checked={draft.sentimentalFlag}
-            onChange={(e) => setDraft((d) => ({ ...d, sentimentalFlag: e.target.checked }))}
-          />
-          <label htmlFor="voice-sentimental" style={{ marginBottom: 0 }}>
-            Sentimental
-          </label>
-        </div>
-
-        <div className="checkbox-row">
-          <input
-            id="voice-keep"
-            type="checkbox"
-            checked={draft.keepFlag}
-            onChange={(e) => setDraft((d) => ({ ...d, keepFlag: e.target.checked }))}
-          />
-          <label htmlFor="voice-keep" style={{ marginBottom: 0 }}>
-            Keep (not for sale/donation)
-          </label>
-        </div>
-
-        <div className="checkbox-row">
-          <input
-            id="voice-willingtosell"
-            type="checkbox"
-            checked={draft.willingToSell}
-            onChange={(e) => setDraft((d) => ({ ...d, willingToSell: e.target.checked }))}
-          />
-          <label htmlFor="voice-willingtosell" style={{ marginBottom: 0 }}>
-            Willing to Sell
-          </label>
-        </div>
 
         <div className="voice-capture__draft-actions">
           <button

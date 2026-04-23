@@ -5,6 +5,7 @@ import { api } from "../api";
 import { SoldPriceSheet } from "./ui/SoldPriceSheet";
 import { CompletionStats } from "./CompletionStats";
 import { formatItemDisplay } from "../utils/formatItemDisplay";
+import { itemIntent, isCompletedItem } from "../utils/itemStatus";
 
 // Long-press to enter selection mode: finger-down for this long without
 // moving more than DRAG_CANCEL_PX triggers multi-select.
@@ -201,6 +202,7 @@ export function PriorityPanel({ projectId, onSelectRoom, onItemChanged, limit, h
 
   const rows = priorities
     .filter((p) => p.score > 0 && itemsById[p.itemId])
+    .filter((p) => !isCompletedItem(itemsById[p.itemId]))
     .slice(0, effectiveLimit);
 
   if (rows.length === 0) return null;
@@ -356,8 +358,10 @@ function PriorityRow({
   const handlePointerCancel = () => { pressStart.current = null; clearPress(); };
 
   const sum = bandSum(priority.breakdown);
-  const multiplier = item.keepFlag ? 0.1 : item.sentimentalFlag ? 0.3 : 1;
-  const multiplierNote = item.keepFlag
+  const intent = itemIntent(item);
+  // TODO(phase-4): derive sentimentalFlag from notes once sentimentalFlag is dropped
+  const multiplier = intent === "keep" ? 0.1 : item.sentimentalFlag ? 0.3 : 1;
+  const multiplierNote = intent === "keep"
     ? "× 0.1 because marked as Keep"
     : item.sentimentalFlag
       ? "× 0.3 because Sentimental"
@@ -563,7 +567,7 @@ function PriorityRow({
             </div>
           </div>
 
-          {item.status === "LISTED" ? (
+          {itemIntent(item) === "sell" && !isCompletedItem(item) ? (
             <>
               <div style={{
                 fontSize: 11, color: "var(--text-muted)",

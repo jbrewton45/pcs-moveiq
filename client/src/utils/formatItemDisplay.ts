@@ -1,4 +1,5 @@
 import type { Item } from "../types";
+import { itemPrimaryLabel } from "./itemStatus";
 
 export const WEAK_NAME_LITERAL = "Scanned Item";
 export const WEAK_CATEGORY_LITERAL = "Uncategorized";
@@ -14,7 +15,7 @@ export interface ItemDisplay {
   isWeak: boolean;
 }
 
-type ItemLike = Pick<Item, "itemName" | "category" | "identifiedName" | "identifiedCategory">;
+type ItemLike = Pick<Item, "itemName" | "category" | "identifiedName" | "identifiedCategory" | "identifiedBrand" | "identifiedModel">;
 
 function isWeakNameValue(value: string | null | undefined): boolean {
   if (value == null) return true;
@@ -29,19 +30,14 @@ function isWeakCategoryValue(value: string | null | undefined): boolean {
 }
 
 export function formatItemDisplay(item: ItemLike): ItemDisplay {
-  const isWeakName = isWeakNameValue(item.itemName);
   const isWeakCategory = isWeakCategoryValue(item.category);
 
-  const identifiedNameUsable =
-    item.identifiedName != null && !isWeakNameValue(item.identifiedName);
   const identifiedCategoryUsable =
     item.identifiedCategory != null && !isWeakCategoryValue(item.identifiedCategory);
 
-  const displayName = isWeakName
-    ? identifiedNameUsable
-      ? (item.identifiedName as string)
-      : WEAK_NAME_DISPLAY
-    : item.itemName;
+  // Delegate name resolution to itemPrimaryLabel — single source of truth.
+  const { label: displayName, weak: labelWeak } = itemPrimaryLabel(item);
+  const isWeakName = labelWeak || isWeakNameValue(item.itemName);
 
   const displayCategory = isWeakCategory
     ? identifiedCategoryUsable

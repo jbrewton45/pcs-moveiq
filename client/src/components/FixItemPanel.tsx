@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Item } from "../types";
+import { itemPrimaryLabel } from "../utils/itemStatus";
 
 export const CATEGORY_OPTIONS = [
   "Furniture", "Electronics", "Appliance", "Kitchen", "Tools",
@@ -33,7 +34,8 @@ export function FixItemPanel({ item, mode, modelOptions, submitting, errorMsg, o
   const initialCategory = (CATEGORY_OPTIONS as readonly string[]).includes(item.identifiedCategory ?? item.category ?? "")
     ? (item.identifiedCategory ?? item.category)!
     : "Other";
-  const [name, setName] = useState(item.identifiedName ?? item.itemName ?? "");
+  const { label: initialName } = itemPrimaryLabel(item);
+  const [name, setName] = useState(initialName === "Needs review" ? "" : initialName);
   const [category, setCategory] = useState<string>(initialCategory);
   const [brand, setBrand] = useState(item.identifiedBrand ?? "");
   const [model, setModel] = useState(item.identifiedModel ?? "");

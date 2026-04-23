@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Item, ItemCondition, SizeClass, Recommendation, Comparable, ComparableSource, ClarificationQuestion, RoomScan, ItemDecisionResult, DecisionBucket, ItemDecisionAction } from "../types";
-import { isCompleted } from "../types";
 import { api, getUploadUrl } from "../api";
+import { isCompletedItem, itemIntent } from "../utils/itemStatus";
 import { CompletionStats } from "./CompletionStats";
 import { VoiceCapture } from "./VoiceCapture";
 import { BottomSheet } from "./ui/BottomSheet";
@@ -444,7 +444,7 @@ function ItemReadCard({
   const quality = item.identificationQuality ?? "STRONG";
   const isWeak = quality === "WEAK";
   const isMedium = quality === "MEDIUM";
-  const isItemCompleted_ = isCompleted(item);
+  const isItemCompleted_ = isCompletedItem(item);
   const itemDisplay = formatItemDisplay(item);
   const showModelPrompt =
     !isWeak &&
@@ -485,8 +485,7 @@ function ItemReadCard({
   const hasAdvancedDetails =
     scannedItem ||
     !!item.notes ||
-    item.sentimentalFlag ||
-    item.keepFlag ||
+    itemIntent(item) === "keep" ||
     comparables.length > 0;
 
   const cardClass = [
@@ -585,18 +584,11 @@ function ItemReadCard({
             {item.notes && (
               <div className="item-card__notes">{item.notes}</div>
             )}
-            {(item.sentimentalFlag || item.keepFlag) && (
+            {itemIntent(item) === "keep" && (
               <div className="item-card__flags">
-                {item.sentimentalFlag && (
-                  <span className="item-card__flag item-card__flag--sentimental">
-                    Sentimental
-                  </span>
-                )}
-                {item.keepFlag && (
-                  <span className="item-card__flag item-card__flag--keep">
-                    Keep
-                  </span>
-                )}
+                <span className="item-card__flag item-card__flag--keep">
+                  Keep
+                </span>
               </div>
             )}
 
@@ -890,9 +882,6 @@ function ItemEditForm({ item, onSave, onRefresh, onCancel, onDelete }: ItemEditF
   const [sizeClass, setSizeClass] = useState<SizeClass>(item.sizeClass);
   const [notes, setNotes] = useState(item.notes ?? "");
   const [weightLbs, setWeightLbs] = useState(item.weightLbs?.toString() ?? "");
-  const [sentimentalFlag, setSentimentalFlag] = useState(item.sentimentalFlag);
-  const [keepFlag, setKeepFlag] = useState(item.keepFlag);
-  const [willingToSell, setWillingToSell] = useState(item.willingToSell);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -912,9 +901,6 @@ function ItemEditForm({ item, onSave, onRefresh, onCancel, onDelete }: ItemEditF
         sizeClass,
         notes: notes || undefined,
         weightLbs: weightLbs.trim() ? parseFloat(weightLbs) : undefined,
-        sentimentalFlag,
-        keepFlag,
-        willingToSell,
       });
       onSave();
     } catch (err) {
@@ -1118,42 +1104,6 @@ function ItemEditForm({ item, onSave, onRefresh, onCancel, onDelete }: ItemEditF
           />
         </label>
 
-        <div className="checkbox-row">
-          <input
-            id={`edit-sentimental-${item.id}`}
-            type="checkbox"
-            checked={sentimentalFlag}
-            onChange={(e) => setSentimentalFlag(e.target.checked)}
-          />
-          <label htmlFor={`edit-sentimental-${item.id}`} style={{ marginBottom: 0 }}>
-            Sentimental
-          </label>
-        </div>
-
-        <div className="checkbox-row">
-          <input
-            id={`edit-keep-${item.id}`}
-            type="checkbox"
-            checked={keepFlag}
-            onChange={(e) => setKeepFlag(e.target.checked)}
-          />
-          <label htmlFor={`edit-keep-${item.id}`} style={{ marginBottom: 0 }}>
-            Keep (not for sale/donation)
-          </label>
-        </div>
-
-        <div className="checkbox-row">
-          <input
-            id={`edit-willingtosell-${item.id}`}
-            type="checkbox"
-            checked={willingToSell}
-            onChange={(e) => setWillingToSell(e.target.checked)}
-          />
-          <label htmlFor={`edit-willingtosell-${item.id}`} style={{ marginBottom: 0 }}>
-            Willing to Sell
-          </label>
-        </div>
-
         {formError && <p className="form-error">{formError}</p>}
 
         <div className="item-edit-actions">
@@ -1245,9 +1195,6 @@ export function RoomDetailView({
   const [sizeClass, setSizeClass] = useState<SizeClass>("MEDIUM");
   const [notes, setNotes] = useState("");
   const [weightLbs, setWeightLbs] = useState("");
-  const [sentimentalFlag, setSentimentalFlag] = useState(false);
-  const [keepFlag, setKeepFlag] = useState(false);
-  const [willingToSell, setWillingToSell] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [showBulkSheet, setShowBulkSheet] = useState(false);
@@ -1262,7 +1209,7 @@ export function RoomDetailView({
       .listItems({ roomId })
       .then(async (fetchedItems) => {
         setItems(fetchedItems);
-        const pricedItems = fetchedItems.filter(i => i.priceFairMarket != null && !isCompleted(i));
+        const pricedItems = fetchedItems.filter(i => i.priceFairMarket != null && !isCompletedItem(i));
         const compEntries = await Promise.all(
           pricedItems.map(async i => [i.id, await api.getComparables(i.id).catch(() => [])] as const)
         );
@@ -1309,9 +1256,9 @@ export function RoomDetailView({
         sizeClass,
         notes: notes || undefined,
         ...(weightLbs.trim() ? { weightLbs: parseFloat(weightLbs) } : {}),
-        sentimentalFlag,
-        keepFlag,
-        willingToSell,
+        sentimentalFlag: false,
+        keepFlag: false,
+        willingToSell: false,
       });
       setItemName("");
       setCategory("");
@@ -1319,9 +1266,6 @@ export function RoomDetailView({
       setSizeClass("MEDIUM");
       setNotes("");
       setWeightLbs("");
-      setSentimentalFlag(false);
-      setKeepFlag(false);
-      setWillingToSell(false);
       setShowIntakeSheet(false);
       setRefreshKey((k) => k + 1);
     } catch (err) {
@@ -1400,9 +1344,9 @@ export function RoomDetailView({
         ebayHighPrice: ebayData.highPrice,
         ebayListingCount: ebayData.listingCount,
         pcsDate: pcsDate ?? undefined,
-        keepFlag: identified.keepFlag,
+        keepFlag: itemIntent(identified) === "keep",
         sentimentalFlag: identified.sentimentalFlag,
-        willingToSell: identified.willingToSell,
+        willingToSell: itemIntent(identified) === "sell",
       });
 
       setDecisions(prev => ({ ...prev, [itemId]: decision }));
@@ -1644,7 +1588,7 @@ export function RoomDetailView({
   const editedItem = editingItemId ? items.find((i) => i.id === editingItemId) ?? null : null;
   const roomWeight = items.reduce((sum, i) => sum + (i.weightLbs ?? 0), 0);
   const scannedItemCount = items.filter(isScannedItem).length;
-  const remainingItemCount = items.filter(i => !isCompleted(i)).length;
+  const remainingItemCount = items.filter(i => !isCompletedItem(i)).length;
 
   function openIntake(mode: "manual" | "voice" | "walkthrough") {
     setIntakeMode(mode);
@@ -1658,14 +1602,14 @@ export function RoomDetailView({
       const created = await api.createItem({
         projectId,
         roomId,
-        itemName: "Scanned Item",
+        itemName: "",
         category: "Uncategorized",
         condition: "GOOD",
         sizeClass: "SMALL",
         notes: undefined,
         sentimentalFlag: false,
         keepFlag: false,
-        willingToSell: true,
+        willingToSell: false,
       });
 
       await api.uploadItemPhoto(created.id, file);
@@ -2063,42 +2007,6 @@ export function RoomDetailView({
                 placeholder="Any context, measurements, or reminders..."
               />
             </label>
-
-            <div className="checkbox-row">
-              <input
-                id="sentimentalFlag"
-                type="checkbox"
-                checked={sentimentalFlag}
-                onChange={(e) => setSentimentalFlag(e.target.checked)}
-              />
-              <label htmlFor="sentimentalFlag" style={{ marginBottom: 0 }}>
-                Sentimental
-              </label>
-            </div>
-
-            <div className="checkbox-row">
-              <input
-                id="keepFlag"
-                type="checkbox"
-                checked={keepFlag}
-                onChange={(e) => setKeepFlag(e.target.checked)}
-              />
-              <label htmlFor="keepFlag" style={{ marginBottom: 0 }}>
-                Keep (not for sale/donation)
-              </label>
-            </div>
-
-            <div className="checkbox-row">
-              <input
-                id="willingToSell"
-                type="checkbox"
-                checked={willingToSell}
-                onChange={(e) => setWillingToSell(e.target.checked)}
-              />
-              <label htmlFor="willingToSell" style={{ marginBottom: 0 }}>
-                Willing to Sell
-              </label>
-            </div>
 
             <button type="submit" disabled={submitting}>
               {submitting ? "Adding..." : "Add Item"}

@@ -1,15 +1,12 @@
 import type { Item } from "../types";
+import { isCompletedItem } from "../utils/itemStatus";
 
 interface CompletionStatsProps {
   items: Item[];
 }
 
-const COMPLETED_STATUSES = ["SOLD", "DONATED", "SHIPPED", "DISCARDED"] as const;
-
 export function CompletionStats({ items }: CompletionStatsProps) {
-  const completed = items.filter((i) =>
-    (COMPLETED_STATUSES as readonly string[]).includes(i.status),
-  );
+  const completed = items.filter(isCompletedItem);
   if (completed.length === 0) return null;
 
   const valueRecovered = items

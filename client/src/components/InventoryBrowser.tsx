@@ -8,8 +8,9 @@ import {
   countWeakItems,
   formatItemCountLabel,
 } from "../utils/formatItemDisplay";
+import { itemLifecycle } from "../utils/itemStatus";
 
-type InventoryMode = "category" | "room" | "status";
+type InventoryMode = "category" | "room" | "status" | "lifecycle";
 type InventoryScope = "active" | "all";
 
 const STATUS_ORDER: ItemStatus[] = [
@@ -124,6 +125,18 @@ export function InventoryBrowser() {
           items: grouped[roomId],
         }));
     }
+    if (mode === "lifecycle") {
+      const LIFECYCLE_ORDER = ["undecided", "planned", "completed"] as const;
+      const LIFECYCLE_LABEL: Record<string, string> = {
+        undecided: "Undecided",
+        planned: "Planned",
+        completed: "Completed",
+      };
+      const grouped = groupBy(filteredItems, (it) => itemLifecycle(it));
+      return LIFECYCLE_ORDER
+        .filter((lc) => grouped[lc]?.length)
+        .map((lc) => ({ key: lc, label: LIFECYCLE_LABEL[lc], items: grouped[lc] }));
+    }
     const grouped = groupBy(filteredItems, (it) => it.status);
     return STATUS_ORDER
       .filter((s) => grouped[s]?.length)
@@ -165,10 +178,10 @@ export function InventoryBrowser() {
       )}
 
       <div role="tablist" aria-label="Group by" style={{
-        display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
+        display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr",
         background: "var(--bg-elevated)", borderRadius: 999, padding: 4, gap: 2,
       }}>
-        {(["category", "room", "status"] as InventoryMode[]).map((m) => (
+        {(["category", "room", "status", "lifecycle"] as InventoryMode[]).map((m) => (
           <button
             key={m}
             role="tab"
@@ -181,7 +194,7 @@ export function InventoryBrowser() {
               color: mode === m ? "var(--text-primary)" : "var(--text-secondary)",
             }}
           >
-            By {m === "category" ? "Category" : m === "room" ? "Room" : "Status"}
+            By {m === "category" ? "Category" : m === "room" ? "Room" : m === "status" ? "Status" : "Lifecycle"}
           </button>
         ))}
       </div>

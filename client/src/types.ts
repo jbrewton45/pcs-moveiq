@@ -207,8 +207,11 @@ export interface Item {
   weightLbs?: number;
   photoPath?: string;
   photos?: ItemPhoto[];
+  /** @deprecated — read via itemIntent(item) instead. Retained for API compatibility until backend Phase 4. */
   sentimentalFlag: boolean;
+  /** @deprecated — read via itemIntent(item) instead. Retained for API compatibility until backend Phase 4. */
   keepFlag: boolean;
+  /** @deprecated — read via itemIntent(item) instead. Retained for API compatibility until backend Phase 4. */
   willingToSell: boolean;
   recommendation: Recommendation;
   recommendationReason?: string;
@@ -266,11 +269,11 @@ export interface OrphanedItem {
 export type DecisionBucket = "sell" | "keep" | "ship" | "donate";
 export type ItemDecisionAction = DecisionBucket | "sold" | "discarded" | "shipped" | "donated";
 
-const COMPLETED_STATUSES = ["SOLD", "DONATED", "SHIPPED", "DISCARDED"] as const;
-export type CompletedStatus = (typeof COMPLETED_STATUSES)[number];
-export function isCompleted(item: Pick<Item, "status">): boolean {
-  return (COMPLETED_STATUSES as readonly string[]).includes(item.status);
-}
+export type ItemIntent =
+  | "undecided" | "sell" | "keep" | "ship" | "donate"
+  | "sold" | "donated" | "shipped" | "discarded";
+
+export type LifecycleStatus = "undecided" | "planned" | "completed";
 
 /** Raw pre-multiplier band contributions from the decision service. */
 export interface ScoreBreakdown {

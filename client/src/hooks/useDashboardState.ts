@@ -130,6 +130,14 @@ export function useDashboardState() {
   const pcsRef = useRef(pcsContext);
   useEffect(() => { pcsRef.current = pcsContext; }, [pcsContext]);
 
+  // Never auto-enqueue completed items on mount (Phase 3 guard).
+  useEffect(() => {
+    const completed = itemsRef.current.filter(it => it.status === "sold").map(it => it.id);
+    if (completed.length > 0) {
+      queueRef.current = queueRef.current.filter(id => !completed.includes(id));
+    }
+  }, []);
+
   // Persist on change
   useEffect(() => { saveItems(items); }, [items]);
   useEffect(() => { savePcs(pcsContext); }, [pcsContext]);

@@ -6,7 +6,7 @@ import { useActiveProject } from "../context/ActiveProjectContext";
 import { ProjectSwitcherSheet } from "./ProjectSwitcherSheet";
 import { ProjectForm } from "./ProjectForm";
 import { formatItemDisplay, countWeakItems } from "../utils/formatItemDisplay";
-import { isActive } from "../utils/itemStatus";
+import { itemIntent, isUndecidedItem } from "../utils/itemStatus";
 
 const PRIORITY_PREVIEW_COUNT = 5;
 
@@ -229,22 +229,22 @@ export function HomeWorkspace() {
           display: "grid", gridTemplateColumns: "1fr 1fr",
           gap: 8, marginBottom: 16,
         }}>
-          {(["KEEP", "SHIP", "SELL_NOW", "DONATE"] as const).map((rec) => {
-            const bucket = items.filter((i) => isActive(i) && i.recommendation === rec);
-            const label = rec === "SELL_NOW" ? "Sell" : rec.charAt(0) + rec.slice(1).toLowerCase();
+          {(["keep", "ship", "donate", "sell"] as const).map((intent) => {
+            const count = items.filter((i) => itemIntent(i) === intent).length;
+            const intentLabel = intent.charAt(0).toUpperCase() + intent.slice(1);
             return (
               <div
-                key={rec}
+                key={intent}
                 style={{
                   background: "var(--bg-card)", border: "1px solid var(--border-soft)",
                   borderRadius: "var(--radius-sm)", padding: 10,
                 }}
               >
                 <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  {label}
+                  {intentLabel}
                 </p>
                 <p style={{ margin: "2px 0 0", fontSize: 18, fontWeight: 700 }}>
-                  {bucket.length}
+                  {count}
                 </p>
               </div>
             );
@@ -273,7 +273,7 @@ export function HomeWorkspace() {
           </p>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-            {priorityItems.map(({ priority, item }) => {
+            {priorityItems.filter(({ item }) => isUndecidedItem(item)).map(({ priority, item }) => {
               const disp = formatItemDisplay(item);
               const room = rooms.find((r) => r.id === item.roomId);
               return (
