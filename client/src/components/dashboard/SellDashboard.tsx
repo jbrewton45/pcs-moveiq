@@ -1,5 +1,8 @@
 import { useState, useRef } from "react";
 import { useDashboardState } from "../../hooks/useDashboardState";
+import { MoveTotalsPanel } from "./MoveTotalsPanel";
+import { RevenueSummary } from "../RevenueSummary";
+import { useActiveProject } from "../../context/ActiveProjectContext";
 import type { DashboardItem, PcsContext, DetectedAccessory } from "../../hooks/useDashboardState";
 import { useVoiceIntake } from "../../hooks/useVoiceIntake";
 import type { UrgencyBucket } from "../../types";
@@ -822,6 +825,7 @@ function sortItems(items: DashboardItem[], mode: SortMode): DashboardItem[] {
 type ViewMode = "list" | "timeline";
 
 export function SellDashboard() {
+  const { activeProjectId } = useActiveProject();
   const {
     items, pcsContext, isProcessing,
     addItem, addMultiple, removeItem, reanalyzeItem,
@@ -934,6 +938,9 @@ export function SellDashboard() {
           Add items you might sell, get pricing and urgency recommendations for your PCS timeline.
         </p>
       </div>
+
+      <MoveTotalsPanel />
+      {activeProjectId && <RevenueSummary projectId={activeProjectId} />}
 
       <DashboardPcsPanel
         pcsContext={pcsContext}

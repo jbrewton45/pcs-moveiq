@@ -60,6 +60,30 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
        WHERE id = $5`,
       [reason, now, now, quality, itemId]
     );
+    // Mirror NULL-clear to item_decisions pricing fields.
+    await query(
+      `INSERT INTO item_decisions (
+         "itemId", intent, recommendation, "recommendationReason",
+         "pricingEligible",
+         "priceFastSale", "priceFairMarket", "priceReach",
+         "pricingConfidence", "pricingReasoning",
+         "pricingSuggestedChannel", "pricingSaleSpeedBand", "pricingLastUpdatedAt",
+         "createdAt", "updatedAt"
+       )
+       VALUES ($1, 'undecided', 'SHIP', NULL, FALSE, NULL, NULL, NULL, NULL, $2, NULL, NULL, $3, NOW()::text, NOW()::text)
+       ON CONFLICT ("itemId") DO UPDATE SET
+         "pricingEligible"         = FALSE,
+         "priceFastSale"           = NULL,
+         "priceFairMarket"         = NULL,
+         "priceReach"              = NULL,
+         "pricingConfidence"       = NULL,
+         "pricingReasoning"        = EXCLUDED."pricingReasoning",
+         "pricingSuggestedChannel" = NULL,
+         "pricingSaleSpeedBand"    = NULL,
+         "pricingLastUpdatedAt"    = EXCLUDED."pricingLastUpdatedAt",
+         "updatedAt"               = NOW()::text`,
+      [itemId, reason, now]
+    );
     await query('DELETE FROM comparables WHERE "itemId" = $1', [itemId]);
     await rederiveRecommendation(itemId);
     const finalResult = await query('SELECT * FROM items WHERE id = $1', [itemId]);
@@ -143,6 +167,7 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
   const now = new Date().toISOString();
 
   if (!hasAI && !hasRealComps) {
+    const noEstimateReason = "Unable to estimate pricing. No AI providers responded and no comparable listings were found. Try again later, or add a photo and more details to improve results.";
     await query(
       `UPDATE items SET
         "priceFastSale" = NULL, "priceFairMarket" = NULL, "priceReach" = NULL,
@@ -151,10 +176,29 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
         "pricingSuggestedChannel" = NULL, "pricingSaleSpeedBand" = NULL,
         "pricingLastUpdatedAt" = $2, "updatedAt" = $3
        WHERE id = $4`,
-      [
-        "Unable to estimate pricing. No AI providers responded and no comparable listings were found. Try again later, or add a photo and more details to improve results.",
-        now, now, itemId,
-      ]
+      [noEstimateReason, now, now, itemId]
+    );
+    // Mirror NULL-clear to item_decisions pricing fields.
+    await query(
+      `INSERT INTO item_decisions (
+         "itemId", intent, recommendation, "recommendationReason",
+         "priceFastSale", "priceFairMarket", "priceReach",
+         "pricingConfidence", "pricingReasoning",
+         "pricingSuggestedChannel", "pricingSaleSpeedBand", "pricingLastUpdatedAt",
+         "createdAt", "updatedAt"
+       )
+       VALUES ($1, 'undecided', 'SHIP', NULL, NULL, NULL, NULL, NULL, $2, NULL, NULL, $3, NOW()::text, NOW()::text)
+       ON CONFLICT ("itemId") DO UPDATE SET
+         "priceFastSale"           = NULL,
+         "priceFairMarket"         = NULL,
+         "priceReach"              = NULL,
+         "pricingConfidence"       = NULL,
+         "pricingReasoning"        = EXCLUDED."pricingReasoning",
+         "pricingSuggestedChannel" = NULL,
+         "pricingSaleSpeedBand"    = NULL,
+         "pricingLastUpdatedAt"    = EXCLUDED."pricingLastUpdatedAt",
+         "updatedAt"               = NOW()::text`,
+      [itemId, noEstimateReason, now]
     );
     await query('DELETE FROM comparables WHERE "itemId" = $1', [itemId]);
     await rederiveRecommendation(itemId);
@@ -243,6 +287,41 @@ export async function generatePricing(itemId: string): Promise<{ item: Item; com
       result.confidence, result.reasoning,
       result.suggestedChannel, result.saleSpeedBand,
       now, now, itemId,
+    ]
+  );
+
+  // Dual-write pricing fields to item_decisions. COALESCE preserves existing
+  // intent/recommendation/identification fields; pricing columns are always overwritten.
+  await query(
+    `INSERT INTO item_decisions (
+       "itemId", intent, recommendation, "recommendationReason",
+       "pricingEligible",
+       "priceFastSale", "priceFairMarket", "priceReach",
+       "pricingConfidence", "pricingReasoning",
+       "pricingSuggestedChannel", "pricingSaleSpeedBand", "pricingLastUpdatedAt",
+       "createdAt", "updatedAt"
+     )
+     VALUES ($1, 'undecided', 'SHIP', NULL, TRUE, $2, $3, $4, $5, $6, $7, $8, $9, NOW()::text, NOW()::text)
+     ON CONFLICT ("itemId") DO UPDATE SET
+       intent                    = COALESCE(item_decisions.intent, EXCLUDED.intent),
+       recommendation            = COALESCE(item_decisions.recommendation, EXCLUDED.recommendation),
+       "recommendationReason"    = COALESCE(item_decisions."recommendationReason", EXCLUDED."recommendationReason"),
+       "pricingEligible"         = TRUE,
+       "priceFastSale"           = EXCLUDED."priceFastSale",
+       "priceFairMarket"         = EXCLUDED."priceFairMarket",
+       "priceReach"              = EXCLUDED."priceReach",
+       "pricingConfidence"       = EXCLUDED."pricingConfidence",
+       "pricingReasoning"        = EXCLUDED."pricingReasoning",
+       "pricingSuggestedChannel" = EXCLUDED."pricingSuggestedChannel",
+       "pricingSaleSpeedBand"    = EXCLUDED."pricingSaleSpeedBand",
+       "pricingLastUpdatedAt"    = EXCLUDED."pricingLastUpdatedAt",
+       "updatedAt"               = NOW()::text`,
+    [
+      itemId,
+      result.fastSale, result.fairMarket, result.reach,
+      result.confidence, result.reasoning,
+      result.suggestedChannel, result.saleSpeedBand,
+      now,
     ]
   );
 

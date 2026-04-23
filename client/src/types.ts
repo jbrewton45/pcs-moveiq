@@ -264,7 +264,7 @@ export interface OrphanedItem {
 }
 
 export type DecisionBucket = "sell" | "keep" | "ship" | "donate";
-export type ItemDecisionAction = DecisionBucket | "sold" | "discarded" | "shipped";
+export type ItemDecisionAction = DecisionBucket | "sold" | "discarded" | "shipped" | "donated";
 
 const COMPLETED_STATUSES = ["SOLD", "DONATED", "SHIPPED", "DISCARDED"] as const;
 export type CompletedStatus = (typeof COMPLETED_STATUSES)[number];

@@ -9,7 +9,7 @@ itemsRouter.get("/prioritized", getPrioritizedHandler);
 itemsRouter.get("/", getItems);
 itemsRouter.post("/bulk-update", (_req, res) => {
   res.status(410).json({
-    error: "Endpoint retired. Use POST /items/bulk-action with an action in {sell,keep,ship,donate,sold,discarded,shipped}.",
+    error: "Endpoint retired. Use POST /items/bulk-action with an action in {sell,keep,ship,donate,sold,discarded,shipped,donated}.",
   });
 });
 itemsRouter.post("/bulk-delete", bulkDeleteItemsHandler);

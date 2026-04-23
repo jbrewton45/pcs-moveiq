@@ -15,9 +15,12 @@ interface CreateItemInput {
   sizeClass: SizeClass;
   notes?: string;
   weightLbs?: number;
-  sentimentalFlag: boolean;
-  keepFlag: boolean;
-  willingToSell: boolean;
+  // Deprecated boolean inputs: retained for API back-compat, not acted on in service logic.
+  sentimentalFlag?: boolean;
+  keepFlag?: boolean;
+  willingToSell?: boolean;
+  // New intent field: controller calls applyItemAction(id, intent) after createItem.
+  intent?: "keep" | "sell" | "ship" | "donate";
 }
 
 interface UpdateItemInput {
@@ -70,13 +73,13 @@ function getConfidenceTier(confidence: number | undefined, hasEbay: boolean): "H
 }
 
 function deriveRecommendation(
-  input: { condition: ItemCondition; sizeClass: SizeClass; sentimentalFlag: boolean; keepFlag: boolean; willingToSell: boolean },
+  input: { condition: ItemCondition; sizeClass: SizeClass; decision?: { intent?: string } | null },
   moveType: MoveType,
   housingAssumption: HousingAssumption,
   pricingContext?: PricingContext,
 ): RecommendationResult {
-  if (input.keepFlag || input.sentimentalFlag) {
-    return { recommendation: "KEEP", reason: input.sentimentalFlag ? "Sentimental item — keep" : "Marked as keep" };
+  if (input.decision?.intent === "keep") {
+    return { recommendation: "KEEP", reason: "Marked as keep" };
   }
   if (input.condition === "POOR") {
     return { recommendation: "DISCARD", reason: "Poor condition — not worth moving" };
@@ -86,7 +89,7 @@ function deriveRecommendation(
   const isSmallerHousing = housingAssumption === "SMALLER";
   const isLarge = input.sizeClass === "LARGE" || input.sizeClass === "OVERSIZED";
 
-  if (input.willingToSell) {
+  if (input.decision?.intent === "sell") {
     const hasPricing = pricingContext?.priceFairMarket != null && pricingContext?.pricingConfidence != null;
     if (hasPricing) {
       const tier = getConfidenceTier(pricingContext!.pricingConfidence, !!pricingContext!.hasEbayComparables);
@@ -139,21 +142,18 @@ export async function createItem(input: CreateItemInput): Promise<Item> {
   const projectResult = await query('SELECT "moveType", "housingAssumption" FROM projects WHERE id = $1', [input.projectId]);
   if (projectResult.rows.length === 0) throw new Error("Project not found");
 
-  const project = projectResult.rows[0] as { moveType: MoveType; housingAssumption: HousingAssumption };
   const now = new Date().toISOString();
   const id = createId("item");
-  const { recommendation, reason } = deriveRecommendation(input, project.moveType, project.housingAssumption);
 
   await query(
     `INSERT INTO items (id, "projectId", "roomId", "itemName", category, condition, "sizeClass",
-      notes, "weightLbs", "sentimentalFlag", "keepFlag", "willingToSell", recommendation, "recommendationReason", status, "createdAt", "updatedAt")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+      notes, "weightLbs", status, "createdAt", "updatedAt")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [
       id, input.projectId, input.roomId, input.itemName, input.category,
       input.condition, input.sizeClass, input.notes ?? null,
       input.weightLbs ?? null,
-      input.sentimentalFlag, input.keepFlag, input.willingToSell,
-      recommendation, reason, "UNREVIEWED", now, now
+      "UNREVIEWED", now, now
     ]
   );
 
@@ -162,16 +162,20 @@ export async function createItem(input: CreateItemInput): Promise<Item> {
 
 /**
  * Apply a user-chosen action (sell/keep/ship/donate/sold/discarded/shipped) to an
- * item. Updates recommendation, status, keepFlag, updatedAt, and — on the first
- * active→terminal transition — completedAt. Does NOT touch pricing, placement,
- * identification, or photos.
+ * item. Updates items.recommendation/status/updatedAt and UPSERTs the matching
+ * item_decisions row. On the first active→terminal transition also sets completedAt.
+ * Does NOT touch pricing, placement, identification, or photos.
  *
  * Returns { item, noOp: true } when the item is already in the target terminal
  * state and no write is needed. Returns null when the item doesn't exist.
  * Throws ItemActionConflictError when the item is already in a different terminal
  * state (or sold with a different price).
  */
-export type ItemDecisionAction = "sell" | "keep" | "ship" | "donate" | "sold" | "discarded" | "shipped";
+export type ItemDecisionAction =
+  // Intents (non-terminal — decision made, not yet executed)
+  | "sell" | "keep" | "ship" | "donate"
+  // Outcomes (terminal — action completed)
+  | "sold" | "discarded" | "shipped" | "donated";
 
 // ── Workstream F: terminal-status helpers ──────────────────────────────────
 
@@ -275,30 +279,54 @@ export async function applyItemAction(
   const isTerminalTransition = isItemCompleted(targetStatus);
   const completedAt = isTerminalTransition ? now : null;
 
+  // For intent actions (non-terminal) decidedAt = now, completedAt = null.
+  // For terminal actions decidedAt = COALESCE(existing, now), except discarded which is NULL.
+  const decidedAt = action === "discarded" ? null : now;
+  const soldPriceUsd = action === "sold" && opts.soldPriceUsd !== undefined ? opts.soldPriceUsd : null;
+
   if (action === "sold" && opts.soldPriceUsd !== undefined) {
     await query(
       `UPDATE items
           SET recommendation = $1,
-              status = $2,
-              "keepFlag" = $3,
+              "recommendationReason" = $2,
+              status = $3,
               "soldPriceUsd" = $4,
               "completedAt" = COALESCE("completedAt", $5),
               "updatedAt" = $6
         WHERE id = $7`,
-      [next.recommendation, next.status, next.keepFlag, opts.soldPriceUsd, completedAt, now, id]
+      [next.recommendation, next.recommendationReason, next.status, opts.soldPriceUsd, completedAt, now, id]
     );
   } else {
     await query(
       `UPDATE items
           SET recommendation = $1,
-              status = $2,
-              "keepFlag" = $3,
+              "recommendationReason" = $2,
+              status = $3,
               "completedAt" = COALESCE("completedAt", $4),
               "updatedAt" = $5
         WHERE id = $6`,
-      [next.recommendation, next.status, next.keepFlag, completedAt, now, id]
+      [next.recommendation, next.recommendationReason, next.status, completedAt, now, id]
     );
   }
+
+  // Dual-write to item_decisions
+  await query(
+    `INSERT INTO item_decisions (
+       "itemId", intent, recommendation, "recommendationReason",
+       "decidedAt", "completedAt", "soldPriceUsd",
+       "createdAt", "updatedAt"
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()::text, NOW()::text)
+     ON CONFLICT ("itemId") DO UPDATE SET
+       intent                  = EXCLUDED.intent,
+       recommendation          = EXCLUDED.recommendation,
+       "recommendationReason"  = COALESCE(EXCLUDED."recommendationReason", item_decisions."recommendationReason"),
+       "decidedAt"             = COALESCE(item_decisions."decidedAt", EXCLUDED."decidedAt"),
+       "completedAt"           = COALESCE(item_decisions."completedAt", EXCLUDED."completedAt"),
+       "soldPriceUsd"          = COALESCE(EXCLUDED."soldPriceUsd", item_decisions."soldPriceUsd"),
+       "updatedAt"             = NOW()::text`,
+    [id, next.intent, next.recommendation, next.recommendationReason, decidedAt, completedAt, soldPriceUsd ?? null]
+  );
 
   const updated = await query('SELECT * FROM items WHERE id = $1', [id]);
   const item = updated.rows.length > 0
@@ -310,8 +338,8 @@ export async function applyItemAction(
 
 /**
  * Set (or clear with `null`) the realized sell price for an item. Pure metadata:
- * does not change recommendation, status, or keepFlag. Typically used after
- * an item has already been marked sold, to capture/correct the final price.
+ * does not change recommendation, status, or the decision intent. Typically used
+ * after an item has already been marked sold, to capture/correct the final price.
  */
 export async function updateItemSoldPrice(
   id: string,
@@ -332,14 +360,17 @@ export async function updateItemSoldPrice(
     : null;
 }
 
-const ACTION_MAP: Record<ItemDecisionAction, { recommendation: string; status: string; keepFlag: boolean }> = {
-  sell:      { recommendation: "SELL_NOW", status: "LISTED",    keepFlag: false },
-  keep:      { recommendation: "KEEP",     status: "KEPT",      keepFlag: true  },
-  ship:      { recommendation: "SHIP",     status: "SHIPPED",   keepFlag: false },
-  donate:    { recommendation: "DONATE",   status: "DONATED",   keepFlag: false },
-  sold:      { recommendation: "COMPLETE", status: "SOLD",      keepFlag: false },
-  discarded: { recommendation: "DISCARD",  status: "DISCARDED", keepFlag: false },
-  shipped:   { recommendation: "SHIP",     status: "SHIPPED",   keepFlag: false },
+const ACTION_MAP: Record<ItemDecisionAction, { recommendation: string; status: string; recommendationReason: string; intent: string }> = {
+  // Intents — decision captured, item still active
+  sell:      { recommendation: "SELL_NOW", status: "LISTED",    recommendationReason: "User intent: sell",    intent: "sell"      },
+  keep:      { recommendation: "KEEP",     status: "KEPT",      recommendationReason: "User intent: keep",    intent: "keep"      },
+  ship:      { recommendation: "SHIP",     status: "REVIEWED",  recommendationReason: "User intent: ship",    intent: "ship"      },
+  donate:    { recommendation: "DONATE",   status: "REVIEWED",  recommendationReason: "User intent: donate",  intent: "donate"    },
+  // Outcomes — terminal
+  sold:      { recommendation: "COMPLETE", status: "SOLD",      recommendationReason: "User intent: sell",    intent: "sell"      },
+  discarded: { recommendation: "DISCARD",  status: "DISCARDED", recommendationReason: "User intent: discard", intent: "discarded" },
+  shipped:   { recommendation: "SHIP",     status: "SHIPPED",   recommendationReason: "User intent: ship",    intent: "ship"      },
+  donated:   { recommendation: "DONATE",   status: "DONATED",   recommendationReason: "User intent: donate",  intent: "donate"    },
 };
 
 /**
@@ -379,19 +410,43 @@ export async function applyBulkItemAction(
   const next = ACTION_MAP[action];
   const now = new Date().toISOString();
 
+  const isTerminalTransition = isItemCompleted(next.status);
+  const completedAt = isTerminalTransition ? now : null;
+  const decidedAt = action === "discarded" ? null : now;
+
   const updatedIds: string[] = [];
   await withTransaction(async (client) => {
     for (const id of itemIds) {
       const res = await client.query(
         `UPDATE items
             SET recommendation = $1,
-                status = $2,
-                "keepFlag" = $3,
-                "updatedAt" = $4
-          WHERE id = $5`,
-        [next.recommendation, next.status, next.keepFlag, now, id]
+                "recommendationReason" = $2,
+                status = $3,
+                "completedAt" = COALESCE("completedAt", $4),
+                "updatedAt" = $5
+          WHERE id = $6`,
+        [next.recommendation, next.recommendationReason, next.status, completedAt, now, id]
       );
-      if ((res.rowCount ?? 0) > 0) updatedIds.push(id);
+      if ((res.rowCount ?? 0) > 0) {
+        updatedIds.push(id);
+        await client.query(
+          `INSERT INTO item_decisions (
+             "itemId", intent, recommendation, "recommendationReason",
+             "decidedAt", "completedAt", "soldPriceUsd",
+             "createdAt", "updatedAt"
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()::text, NOW()::text)
+           ON CONFLICT ("itemId") DO UPDATE SET
+             intent                  = EXCLUDED.intent,
+             recommendation          = EXCLUDED.recommendation,
+             "recommendationReason"  = COALESCE(EXCLUDED."recommendationReason", item_decisions."recommendationReason"),
+             "decidedAt"             = COALESCE(item_decisions."decidedAt", EXCLUDED."decidedAt"),
+             "completedAt"           = COALESCE(item_decisions."completedAt", EXCLUDED."completedAt"),
+             "soldPriceUsd"          = COALESCE(EXCLUDED."soldPriceUsd", item_decisions."soldPriceUsd"),
+             "updatedAt"             = NOW()::text`,
+          [id, next.intent, next.recommendation, next.recommendationReason, decidedAt, completedAt, null]
+        );
+      }
     }
   });
 
@@ -517,38 +572,17 @@ export async function updateItem(id: string, input: UpdateItemInput): Promise<It
     sizeClass: (input.sizeClass ?? existing.sizeClass) as SizeClass,
     notes: input.notes !== undefined ? input.notes : existing.notes,
     weightLbs: input.weightLbs !== undefined ? input.weightLbs : existing.weightLbs,
-    sentimentalFlag: input.sentimentalFlag ?? existing.sentimentalFlag,
-    keepFlag: input.keepFlag ?? existing.keepFlag,
-    willingToSell: input.willingToSell ?? existing.willingToSell,
   };
-
-  const projectResult = await query('SELECT "moveType", "housingAssumption" FROM projects WHERE id = $1', [existing.projectId]);
-  let recommendation = existing.recommendation;
-  let reason = existing.recommendationReason ?? "";
-  if (projectResult.rows.length > 0) {
-    const project = projectResult.rows[0] as { moveType: MoveType; housingAssumption: HousingAssumption };
-    const pricingCtx: PricingContext | undefined = existing.priceFairMarket != null ? {
-      priceFairMarket: existing.priceFairMarket,
-      pricingConfidence: existing.pricingConfidence,
-      hasEbayComparables: false,
-      identificationStatus: existing.identificationStatus,
-    } : undefined;
-    const result = deriveRecommendation(merged, project.moveType, project.housingAssumption, pricingCtx);
-    recommendation = result.recommendation;
-    reason = result.reason;
-  }
 
   const now = new Date().toISOString();
   await query(
     `UPDATE items SET "itemName" = $1, category = $2, condition = $3, "sizeClass" = $4,
-      notes = $5, "weightLbs" = $6, "sentimentalFlag" = $7, "keepFlag" = $8, "willingToSell" = $9,
-      recommendation = $10, "recommendationReason" = $11, "updatedAt" = $12
-     WHERE id = $13`,
+      notes = $5, "weightLbs" = $6, "updatedAt" = $7
+     WHERE id = $8`,
     [
       merged.itemName, merged.category, merged.condition, merged.sizeClass,
       merged.notes ?? null, merged.weightLbs ?? null,
-      merged.sentimentalFlag, merged.keepFlag, merged.willingToSell,
-      recommendation, reason, now, id
+      now, id
     ]
   );
 
@@ -785,6 +819,15 @@ export async function rederiveRecommendation(itemId: string): Promise<Item | nul
   );
   const ebayCount = Number((ebayResult.rows[0] as { cnt: string }).cnt);
 
+  // Fetch decision row to get intent for deriveRecommendation
+  const decisionResult = await query(
+    'SELECT intent FROM item_decisions WHERE "itemId" = $1',
+    [itemId]
+  );
+  const decision = decisionResult.rows.length > 0
+    ? (decisionResult.rows[0] as { intent: string })
+    : null;
+
   const pricingCtx: PricingContext | undefined = item.priceFairMarket != null ? {
     priceFairMarket: item.priceFairMarket,
     pricingConfidence: item.pricingConfidence,
@@ -793,7 +836,8 @@ export async function rederiveRecommendation(itemId: string): Promise<Item | nul
   } : undefined;
 
   const { recommendation, reason } = deriveRecommendation(
-    item, project.moveType, project.housingAssumption, pricingCtx,
+    { condition: item.condition, sizeClass: item.sizeClass, decision },
+    project.moveType, project.housingAssumption, pricingCtx,
   );
 
   if (recommendation !== item.recommendation || reason !== item.recommendationReason) {
@@ -801,6 +845,24 @@ export async function rederiveRecommendation(itemId: string): Promise<Item | nul
     await query(
       'UPDATE items SET recommendation = $1, "recommendationReason" = $2, "updatedAt" = $3 WHERE id = $4',
       [recommendation, reason, now, itemId]
+    );
+    // Dual-write: update decision recommendation (preserve intent/decidedAt/completedAt)
+    await query(
+      `INSERT INTO item_decisions (
+         "itemId", intent, recommendation, "recommendationReason",
+         "decidedAt", "completedAt", "soldPriceUsd",
+         "createdAt", "updatedAt"
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()::text, NOW()::text)
+       ON CONFLICT ("itemId") DO UPDATE SET
+         intent                  = EXCLUDED.intent,
+         recommendation          = EXCLUDED.recommendation,
+         "recommendationReason"  = COALESCE(EXCLUDED."recommendationReason", item_decisions."recommendationReason"),
+         "decidedAt"             = COALESCE(item_decisions."decidedAt", EXCLUDED."decidedAt"),
+         "completedAt"           = COALESCE(item_decisions."completedAt", EXCLUDED."completedAt"),
+         "soldPriceUsd"          = COALESCE(EXCLUDED."soldPriceUsd", item_decisions."soldPriceUsd"),
+         "updatedAt"             = NOW()::text`,
+      [itemId, decision?.intent ?? "undecided", recommendation, reason, null, null, null]
     );
   }
 
@@ -812,9 +874,29 @@ export async function submitClarifications(itemId: string, answers: Record<strin
   const existing = await getItemById(itemId);
   if (!existing) return null;
   const now = new Date().toISOString();
+  const answersJson = JSON.stringify(answers);
   await query(
     `UPDATE items SET "clarificationAnswers" = $1, "pendingClarifications" = NULL, "updatedAt" = $2 WHERE id = $3`,
-    [JSON.stringify(answers), now, itemId]
+    [answersJson, now, itemId]
+  );
+  // Dual-write to item_decisions — mirror the clarificationAnswers write and
+  // clear pendingClarifications. COALESCE preserves any existing intent /
+  // recommendation / pricing / identification fields on the decision row.
+  await query(
+    `INSERT INTO item_decisions (
+       "itemId", intent, recommendation, "recommendationReason",
+       "pendingClarifications", "clarificationAnswers",
+       "createdAt", "updatedAt"
+     )
+     VALUES ($1, 'undecided', 'SHIP', NULL, NULL, $2, NOW()::text, NOW()::text)
+     ON CONFLICT ("itemId") DO UPDATE SET
+       intent                 = COALESCE(item_decisions.intent, EXCLUDED.intent),
+       recommendation         = COALESCE(item_decisions.recommendation, EXCLUDED.recommendation),
+       "recommendationReason" = COALESCE(item_decisions."recommendationReason", EXCLUDED."recommendationReason"),
+       "pendingClarifications" = NULL,
+       "clarificationAnswers"  = EXCLUDED."clarificationAnswers",
+       "updatedAt"             = NOW()::text`,
+    [itemId, answersJson]
   );
   return (await getItemById(itemId))!;
 }

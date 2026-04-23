@@ -4,6 +4,7 @@ import type { DecisionBucket, Item, ItemDecisionAction, PrioritizedItem, ScoreBr
 import { api } from "../api";
 import { SoldPriceSheet } from "./ui/SoldPriceSheet";
 import { CompletionStats } from "./CompletionStats";
+import { formatItemDisplay } from "../utils/formatItemDisplay";
 
 // Long-press to enter selection mode: finger-down for this long without
 // moving more than DRAG_CANCEL_PX triggers multi-select.
@@ -402,19 +403,32 @@ function PriorityRow({
         />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {item.itemName}
-            </span>
             <span
               style={{
-                fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                background: color, color: "#fff",
-                borderRadius: 4, padding: "2px 6px", flexShrink: 0,
+                fontWeight: 600,
+                fontSize: 14,
+                color: "var(--text-primary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                fontStyle: formatItemDisplay(item).isWeakName ? "italic" : "normal",
+                opacity: formatItemDisplay(item).isWeakName ? 0.75 : 1,
               }}
             >
-              {BUCKET_LABEL[priority.recommendation]}
+              {formatItemDisplay(item).displayName}
             </span>
+            {item.identificationQuality !== "WEAK" && (
+              <span
+                style={{
+                  fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  background: color, color: "#fff",
+                  borderRadius: 4, padding: "2px 6px", flexShrink: 0,
+                }}
+              >
+                {BUCKET_LABEL[priority.recommendation]}
+              </span>
+            )}
           </div>
           <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {priority.reason}
@@ -597,9 +611,9 @@ function PriorityRow({
               gap: 8,
             }}>
               <ActionButton label="List for sale"  tone="sell"   onClick={onListForSale} />
-              <ActionButton label="Mark as donate" tone="donate" onClick={() => onAction("donate")} />
-              <ActionButton label="Mark as ship"   tone="ship"   onClick={() => onAction("ship")} />
-              <ActionButton label="Mark as keep"   tone="keep"   onClick={() => onAction("keep")} />
+              <ActionButton label="Plan to donate" tone="donate" onClick={() => onAction("donate")} />
+              <ActionButton label="Plan to ship"   tone="ship"   onClick={() => onAction("ship")} />
+              <ActionButton label="Plan to keep"   tone="keep"   onClick={() => onAction("keep")} />
             </div>
           )}
 
@@ -742,7 +756,7 @@ function readableCondition(c: Item["condition"]): string {
 }
 
 function defaultListing(item: Item): { title: string; price: string; description: string } {
-  const title = item.identifiedName ?? item.itemName;
+  const title = formatItemDisplay(item).displayName;
   const priceNum = item.priceFairMarket ?? item.priceFastSale ?? 0;
   const price = priceNum > 0 ? Math.round(priceNum).toString() : "";
   const priceLine = price ? ` Asking $${price}.` : "";

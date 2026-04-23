@@ -34,9 +34,12 @@ export const CreateItemSchema = z.object({
   sizeClass: z.enum(["SMALL", "MEDIUM", "LARGE", "OVERSIZED"]),
   notes: z.string().optional().transform(v => v === "" ? undefined : v),
   weightLbs: z.number().positive().optional(),
-  sentimentalFlag: z.boolean(),
-  keepFlag: z.boolean(),
-  willingToSell: z.boolean(),
+  // Deprecated boolean inputs retained for API back-compat — logic no longer branches on them.
+  sentimentalFlag: z.boolean().optional(),
+  keepFlag: z.boolean().optional(),
+  willingToSell: z.boolean().optional(),
+  // New intent field: drives applyItemAction after createItem.
+  intent: z.enum(["keep", "sell", "ship", "donate"]).optional(),
 });
 
 export const UpdateItemSchema = z.object({
@@ -71,14 +74,14 @@ export const UpdateRoomSchema = z.object({
 // ── Decision action ─────────────────────────────────────────────────────────
 
 export const ItemActionSchema = z.object({
-  action: z.enum(["sell", "keep", "ship", "donate", "sold", "discarded", "shipped"]),
+  action: z.enum(["sell", "keep", "ship", "donate", "sold", "discarded", "shipped", "donated"]),
   /** Only meaningful when action === "sold"; ignored otherwise. Optional. */
   soldPriceUsd: z.number().nonnegative().max(1_000_000).optional(),
 });
 
 export const BulkItemActionSchema = z.object({
   itemIds: z.array(z.string().min(1)).min(1),
-  action: z.enum(["sell", "keep", "ship", "donate", "sold", "discarded", "shipped"]),
+  action: z.enum(["sell", "keep", "ship", "donate", "sold", "discarded", "shipped", "donated"]),
 });
 
 export const UpdateItemListingSchema = z.object({

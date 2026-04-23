@@ -28,9 +28,7 @@ export interface DecisionInput {
   ebayHighPrice?: number;
   ebayListingCount?: number;
   pcsDate?: string;
-  keepFlag?: boolean;
-  sentimentalFlag?: boolean;
-  willingToSell?: boolean;
+  intent?: "sell" | "keep" | "ship" | "donate" | "undecided" | "discarded";
 }
 
 export type RecommendedAction =
@@ -220,7 +218,7 @@ function daysUntilPCS(pcsDateIso?: string): number | null {
 // ── Action determination ────────────────────────────────────────────────────
 
 function determineAction(input: DecisionInput, value: number, days: number | null): RecommendedAction {
-  if (input.keepFlag || input.sentimentalFlag) return "SHIP";
+  if (input.intent === "keep") return "SHIP";
 
   if (input.condition === "POOR" && value < 20) return "DISCARD";
   if (input.condition === "POOR") return "DONATE";
@@ -231,7 +229,7 @@ function determineAction(input: DecisionInput, value: number, days: number | nul
   if (value >= 100 && days != null && days <= 30) return "SELL_NOW";
   if (value >= 50 && days != null && days <= 60) return "SELL_NOW";
   if (value >= 50) return "SELL_LATER";
-  if (value >= 30 && input.willingToSell) return "SELL_LATER";
+  if (value >= 30 && input.intent === "sell") return "SELL_LATER";
 
   if (isLarge) return "SHIP";
   return "SHIP";
@@ -283,8 +281,7 @@ function buildRationale(
   platform: string | null,
   conf: { score: number; level: ConfidenceLevel },
 ): string {
-  if (input.keepFlag) return "Marked as keep — ship with household goods.";
-  if (input.sentimentalFlag) return "Sentimental item — keep and ship.";
+  if (input.intent === "keep") return "Marked as keep — ship with household goods.";
 
   if (action === "DISCARD") {
     return `Poor condition and only ${currency(value)} value — not worth selling or donating. Consider discarding.`;
@@ -349,8 +346,7 @@ export function computeDecision(input: DecisionInput): DecisionOutput {
   let raw = (breakdown.valueScore + breakdown.sizeScore + breakdown.urgencyScore
     + breakdown.conditionScore + breakdown.demandScore) * confMult;
 
-  if (input.keepFlag) raw *= 0.1;
-  else if (input.sentimentalFlag) raw *= 0.3;
+  if (input.intent === "keep") raw *= 0.1;
 
   const urgencyScore = clamp(Math.round(raw), 0, 100);
   const recommendedAction = determineAction(input, value, days);

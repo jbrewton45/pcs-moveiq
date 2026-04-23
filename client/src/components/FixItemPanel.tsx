@@ -83,11 +83,11 @@ export function FixItemPanel({ item, mode, modelOptions, submitting, errorMsg, o
 
   // headline + subhead vary slightly by mode but layout is consistent
   const headline =
-    mode === "weak" ? "Fix this item"
+    mode === "weak" ? "Almost there — we need a bit more info"
     : mode === "model-pick" ? "Pick the right model"
     : "Refine identification";
   const subhead =
-    mode === "weak" ? "We couldn't confidently identify this. Fill in what you know — we'll re-price after."
+    mode === "weak" ? "A quick tweak or two will help us price this accurately."
     : mode === "model-pick" ? "Choose the model you have so we can refine the price."
     : "Optional — adjust the details and we'll re-price.";
 

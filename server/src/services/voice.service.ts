@@ -13,9 +13,8 @@ export interface ParsedVoiceItem {
   condition: string;
   sizeClass: string;
   notes: string;
-  willingToSell: boolean;
-  keepFlag: boolean;
-  sentimentalFlag: boolean;
+  intent?: "keep" | "sell" | "ship" | "donate";
+  sentimental: boolean;
 }
 
 export async function parseVoiceTranscript(
@@ -41,9 +40,8 @@ export async function parseVoiceTranscript(
     condition: "GOOD",
     sizeClass: "MEDIUM",
     notes: transcript,
-    willingToSell: true,
-    keepFlag: false,
-    sentimentalFlag: false,
+    intent: undefined,
+    sentimental: false,
   };
 }
 
@@ -81,9 +79,8 @@ export async function parseVoiceWithPhoto(
       condition: "GOOD",
       sizeClass: "MEDIUM",
       notes: "",
-      willingToSell: true,
-      keepFlag: false,
-      sentimentalFlag: false,
+      intent: undefined,
+      sentimental: false,
     };
   }
 
@@ -103,9 +100,8 @@ Return a JSON object:
   "condition": "one of: NEW, LIKE_NEW, GOOD, FAIR, POOR",
   "sizeClass": "one of: SMALL, MEDIUM, LARGE, OVERSIZED",
   "notes": "any extra details visible in the photo (accessories, bundles, visible damage, configuration details, etc.)",
-  "willingToSell": true or false (default true — no spoken intent to infer from),
-  "keepFlag": true or false (default false — no spoken intent to infer from),
-  "sentimentalFlag": true or false (default false — no spoken intent to infer from)
+  "intent": null,
+  "sentimental": false
 }
 
 Rules:
@@ -115,7 +111,7 @@ Rules:
 - Assess condition from visual evidence: visible scratches, wear marks, or damage should lower condition from GOOD; pristine items can be LIKE_NEW or NEW
 - Size: SMALL (fits in a box), MEDIUM (chair-sized), LARGE (couch/desk), OVERSIZED (piano/treadmill)
 - Notes should capture accessory/bundle info visible in the photo: "with lens", "includes case", "body only", etc.
-- willingToSell defaults to true; keepFlag and sentimentalFlag default to false (no user speech to infer intent)
+- intent defaults to null and sentimental defaults to false (no user speech to infer intent from photo alone)
 - Return ONLY the JSON object`;
 }
 
@@ -132,9 +128,8 @@ Return a JSON object:
   "condition": "one of: NEW, LIKE_NEW, GOOD, FAIR, POOR",
   "sizeClass": "one of: SMALL, MEDIUM, LARGE, OVERSIZED",
   "notes": "any extra details from transcript not captured above (accessories, bundles, damage notes, etc.)",
-  "willingToSell": true or false (infer from context — if they mention selling, listing, getting rid of, or price → true; if they say keep, sentimental, irreplaceable → false; default true),
-  "keepFlag": true or false (only if they explicitly say they want to keep it),
-  "sentimentalFlag": true or false (only if they mention sentimental value, family heirloom, etc.)
+  "intent": "keep" or "sell" or "ship" or "donate" or null (null if user expressed no clear intent),
+  "sentimental": true or false (true if user expressed sentimental attachment, family heirloom, irreplaceable, etc.)
 }
 
 Rules:
@@ -143,6 +138,7 @@ Rules:
 - Condition defaults to GOOD unless they mention damage, wear, new, etc.
 - Size: SMALL (fits in a box), MEDIUM (chair-sized), LARGE (couch/desk), OVERSIZED (piano/treadmill)
 - Notes should capture accessory/bundle info: "with lens", "includes case", "body only", etc.
+- intent: use "keep" if user said they want to keep it, "sell" if they want to sell it, "ship" if they want to ship it, "donate" if they want to donate it, null otherwise
 - Return ONLY the JSON object`;
 }
 
@@ -164,9 +160,8 @@ Return a JSON object:
   "condition": "one of: NEW, LIKE_NEW, GOOD, FAIR, POOR",
   "sizeClass": "one of: SMALL, MEDIUM, LARGE, OVERSIZED",
   "notes": "any extra details from transcript or photo not captured above (accessories, bundles, visible damage, configuration details, etc.)",
-  "willingToSell": true or false (infer from context — if they mention selling, listing, getting rid of, or price → true; if they say keep, sentimental, irreplaceable → false; default true),
-  "keepFlag": true or false (only if they explicitly say they want to keep it),
-  "sentimentalFlag": true or false (only if they mention sentimental value, family heirloom, etc.)
+  "intent": "keep" or "sell" or "ship" or "donate" or null (null if user expressed no clear intent),
+  "sentimental": true or false (true if user expressed sentimental attachment, family heirloom, irreplaceable, etc.)
 }
 
 Rules:
@@ -175,6 +170,7 @@ Rules:
 - Let the photo inform condition: visible scratches, wear marks, or damage should lower condition from GOOD
 - Size: SMALL (fits in a box), MEDIUM (chair-sized), LARGE (couch/desk), OVERSIZED (piano/treadmill)
 - Notes should capture accessory/bundle info visible in the photo: "with lens", "includes case", "body only", etc.
+- intent: use "keep" if user said they want to keep it, "sell" if they want to sell it, "ship" if they want to ship it, "donate" if they want to donate it, null otherwise
 - Return ONLY the JSON object`;
 }
 
@@ -311,20 +307,30 @@ function parseJSON(text: string): ParsedVoiceItem | null {
   try {
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) return null;
-    const parsed = JSON.parse(match[0]) as ParsedVoiceItem;
+    const raw = JSON.parse(match[0]) as Record<string, unknown>;
     // Validate required fields
-    if (!parsed.itemName || typeof parsed.itemName !== "string") return null;
+    if (!raw.itemName || typeof raw.itemName !== "string") return null;
     // Normalize enums
     const validConditions = ["NEW", "LIKE_NEW", "GOOD", "FAIR", "POOR"];
-    if (!validConditions.includes(parsed.condition)) parsed.condition = "GOOD";
+    const condition = validConditions.includes(raw.condition as string) ? (raw.condition as string) : "GOOD";
     const validSizes = ["SMALL", "MEDIUM", "LARGE", "OVERSIZED"];
-    if (!validSizes.includes(parsed.sizeClass)) parsed.sizeClass = "MEDIUM";
+    const sizeClass = validSizes.includes(raw.sizeClass as string) ? (raw.sizeClass as string) : "MEDIUM";
     const validCategories = ["Furniture", "Electronics", "Appliance", "Keepsake", "Media", "Linens", "Decor", "Tools", "Sports", "Clothing", "Other"];
-    if (!validCategories.includes(parsed.category)) parsed.category = "Other";
-    parsed.willingToSell = !!parsed.willingToSell;
-    parsed.keepFlag = !!parsed.keepFlag;
-    parsed.sentimentalFlag = !!parsed.sentimentalFlag;
-    return parsed;
+    const category = validCategories.includes(raw.category as string) ? (raw.category as string) : "Other";
+    const validIntents = ["keep", "sell", "ship", "donate"];
+    const rawIntent = raw.intent;
+    const intent = typeof rawIntent === "string" && validIntents.includes(rawIntent)
+      ? (rawIntent as "keep" | "sell" | "ship" | "donate")
+      : undefined;
+    return {
+      itemName: raw.itemName as string,
+      category,
+      condition,
+      sizeClass,
+      notes: typeof raw.notes === "string" ? raw.notes : "",
+      intent,
+      sentimental: !!(raw.sentimental),
+    };
   } catch {
     return null;
   }

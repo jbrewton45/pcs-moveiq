@@ -20,9 +20,7 @@ const DecisionInputSchema = z.object({
   ebayHighPrice: z.number().nonnegative().optional(),
   ebayListingCount: z.number().int().nonnegative().optional(),
   pcsDate: z.string().date().optional(),
-  keepFlag: z.boolean().optional(),
-  sentimentalFlag: z.boolean().optional(),
-  willingToSell: z.boolean().optional(),
+  intent: z.enum(["sell", "keep", "ship", "donate", "undecided", "discarded"]).optional(),
 });
 
 const BatchDecisionSchema = z.object({

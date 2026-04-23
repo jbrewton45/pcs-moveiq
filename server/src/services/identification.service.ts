@@ -175,6 +175,54 @@ export async function identifyItem(itemId: string): Promise<IdentifyResult | nul
     ]
   );
 
+  // Dual-write identification fields to item_decisions. COALESCE preserves any
+  // existing intent/recommendation/pricing that may have been set independently.
+  await query(
+    `INSERT INTO item_decisions (
+       "itemId", intent, recommendation, "recommendationReason",
+       "pricingEligible",
+       "identifiedName", "identifiedCategory", "identifiedBrand", "identifiedModel",
+       "likelyModelOptions", "requiresModelSelection",
+       "identificationConfidence", "identificationReasoning",
+       "identificationStatus", "identificationQuality",
+       "pendingClarifications",
+       "createdAt", "updatedAt"
+     )
+     VALUES ($1, 'undecided', 'SHIP', NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW()::text, NOW()::text)
+     ON CONFLICT ("itemId") DO UPDATE SET
+       intent                    = COALESCE(item_decisions.intent, EXCLUDED.intent),
+       recommendation            = COALESCE(item_decisions.recommendation, EXCLUDED.recommendation),
+       "recommendationReason"    = COALESCE(item_decisions."recommendationReason", EXCLUDED."recommendationReason"),
+       "pricingEligible"         = EXCLUDED."pricingEligible",
+       "identifiedName"          = EXCLUDED."identifiedName",
+       "identifiedCategory"      = EXCLUDED."identifiedCategory",
+       "identifiedBrand"         = EXCLUDED."identifiedBrand",
+       "identifiedModel"         = EXCLUDED."identifiedModel",
+       "likelyModelOptions"      = EXCLUDED."likelyModelOptions",
+       "requiresModelSelection"  = EXCLUDED."requiresModelSelection",
+       "identificationConfidence" = EXCLUDED."identificationConfidence",
+       "identificationReasoning" = EXCLUDED."identificationReasoning",
+       "identificationStatus"    = EXCLUDED."identificationStatus",
+       "identificationQuality"   = EXCLUDED."identificationQuality",
+       "pendingClarifications"   = EXCLUDED."pendingClarifications",
+       "updatedAt"               = NOW()::text`,
+    [
+      itemId,
+      pricingEligible,
+      identResult.identifiedName,
+      identResult.identifiedCategory,
+      identResult.identifiedBrand,
+      identResult.identifiedModel,
+      likelyJson,
+      requiresSel,
+      identResult.confidence,
+      identResult.reasoning,
+      "SUGGESTED",
+      identificationQuality,
+      pendingClarificationsJson,
+    ]
+  );
+
   const updated = await query('SELECT * FROM items WHERE id = $1', [itemId]);
   if (updated.rows.length === 0) return null;
 

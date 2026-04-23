@@ -8,10 +8,10 @@ import { query } from "../data/database.js";
 export type DecisionBucket = "sell" | "keep" | "ship" | "donate";
 
 /**
- * Per-band raw contributions (pre-multiplier). If the item has keepFlag or
- * sentimentalFlag, the caller applies a 0.1× / 0.3× multiplier to the SUM to
- * produce the final score — so the individual band values here may not sum to
- * the `score` field in those cases. Each number is a non-negative integer.
+ * Per-band raw contributions (pre-multiplier). If decision.intent === "keep",
+ * the caller applies a 0.1× multiplier to the SUM to produce the final score —
+ * so the individual band values here may not sum to the `score` field in that
+ * case. Each number is a non-negative integer.
  */
 export interface ScoreBreakdown {
   value: number;
@@ -141,9 +141,8 @@ function currency(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-function categorize(item: Item, valueUsd: number): { bucket: DecisionBucket; reason: string } {
-  if (item.keepFlag) return { bucket: "keep", reason: "Marked as keep" };
-  if (item.sentimentalFlag) return { bucket: "keep", reason: "Sentimental — keeping with you" };
+function categorize(item: Item, valueUsd: number, decision: { intent?: string } | null): { bucket: DecisionBucket; reason: string } {
+  if (decision?.intent === "keep") return { bucket: "keep", reason: "Marked as keep" };
 
   if (item.condition === "POOR") {
     return { bucket: "donate", reason: "Poor condition — donate or discard" };
@@ -154,7 +153,7 @@ function categorize(item: Item, valueUsd: number): { bucket: DecisionBucket; rea
     return { bucket: "donate", reason: "Bulky & under $30 — donate and save the weight" };
   }
 
-  if (valueUsd >= 100 && item.willingToSell) {
+  if (valueUsd >= 100 && decision?.intent === "sell") {
     return { bucket: "sell", reason: `${currency(valueUsd)} fair market — sell to fund the move` };
   }
   if (valueUsd >= 50) {
@@ -178,7 +177,8 @@ function clamp(n: number, lo: number, hi: number): number {
 export function scoreItem(
   item: Item,
   hardMoveDateIso: string | null | undefined,
-  calibration?: PriceCalibration
+  calibration?: PriceCalibration,
+  decision?: { intent?: string } | null,
 ): PrioritizedItem {
   const rawValueUsd = item.priceFairMarket ?? item.priceFastSale ?? 0;
 
@@ -194,19 +194,18 @@ export function scoreItem(
     size:      sizeBand(item.sizeClass, item.weightLbs),
     urgency:   urgencyBand(hardMoveDateIso),
     condition: conditionBand(item.condition),
-    sellBonus: item.willingToSell ? 10 : 0,
+    sellBonus: decision?.intent === "sell" ? 10 : 0,
   };
 
   let raw = breakdown.value + breakdown.size + breakdown.urgency + breakdown.condition + breakdown.sellBonus;
 
-  if (item.keepFlag)               raw *= 0.1;
-  else if (item.sentimentalFlag)   raw *= 0.3;
+  if (decision?.intent === "keep") raw *= 0.1;
 
   const score = clamp(Math.round(raw), 0, 100);
   // Use the calibrated value for bucket thresholds too — otherwise a $150 item
   // in a category that historically sells at 40% would still bucket as "sell"
   // when its realistic value is $60.
-  const { bucket, reason } = categorize(item, valueUsd);
+  const { bucket, reason } = categorize(item, valueUsd, decision ?? null);
 
   const out: PrioritizedItem = { itemId: item.id, score, recommendation: bucket, reason, breakdown };
   if (calEntry != null) {
@@ -272,9 +271,12 @@ export async function getPriceCalibration(projectId: string): Promise<PriceCalib
   return calibration;
 }
 
-/** Statuses that mean the user has finished dealing with an item — excluded
- *  from prioritization so they don't linger at the top of "Do This First". */
-const COMPLETED_STATUSES = new Set<string>(["SOLD", "DONATED", "SHIPPED", "DISCARDED"]);
+/** Statuses that mean the user has made a decision (intent or outcome) — excluded
+ *  from prioritization so the "Do This First" list shows only undecided items.
+ *  UNREVIEWED is the only status that remains in the active pool. */
+const DECIDED_STATUSES = new Set<string>([
+  "REVIEWED", "LISTED", "KEPT", "SOLD", "DONATED", "SHIPPED", "DISCARDED",
+]);
 
 export async function prioritizeProject(
   projectId: string,
@@ -286,8 +288,26 @@ export async function prioritizeProject(
     getPriceCalibration(projectId),
   ]);
   const hardMoveDate = project?.hardMoveDate ?? null;
-  const active = items.filter((it) => !COMPLETED_STATUSES.has(it.status));
-  const scored = active.map((it) => scoreItem(it, hardMoveDate, calibration));
+  const active = items.filter((it) => !DECIDED_STATUSES.has(it.status));
+
+  // Fetch decision rows for all active items in one query
+  const activeIds = active.map((it) => it.id);
+  const decisionMap = new Map<string, string>();
+  if (activeIds.length > 0) {
+    const decResult = await query(
+      'SELECT "itemId", intent FROM item_decisions WHERE "itemId" = ANY($1)',
+      [activeIds]
+    );
+    for (const row of decResult.rows as { itemId: string; intent: string }[]) {
+      decisionMap.set(row.itemId, row.intent);
+    }
+  }
+
+  const scored = active.map((it) => {
+    const intent = decisionMap.get(it.id);
+    const decision = intent != null ? { intent } : null;
+    return scoreItem(it, hardMoveDate, calibration, decision);
+  });
 
   // Sort by score desc; tiebreaker on itemId asc to keep results stable.
   scored.sort((a, b) => {

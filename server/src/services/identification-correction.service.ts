@@ -48,6 +48,67 @@ export async function correctAndReprice(
        WHERE id = $2`,
       [now, itemId],
     );
+
+    // Mirror the corrected identification fields to item_decisions. confirmIdentification
+    // already forced identificationQuality=STRONG and pricingEligible=true on items.
+    await query(
+      `INSERT INTO item_decisions (
+         "itemId", intent, recommendation, "recommendationReason",
+         "pricingEligible",
+         "identifiedName", "identifiedCategory", "identifiedBrand", "identifiedModel",
+         "likelyModelOptions", "requiresModelSelection",
+         "identificationStatus", "identificationQuality",
+         "createdAt", "updatedAt"
+       )
+       VALUES ($1, 'undecided', 'SHIP', NULL, TRUE, $2, $3, $4, $5, NULL, FALSE, $6, 'STRONG', NOW()::text, NOW()::text)
+       ON CONFLICT ("itemId") DO UPDATE SET
+         intent                    = COALESCE(item_decisions.intent, EXCLUDED.intent),
+         recommendation            = COALESCE(item_decisions.recommendation, EXCLUDED.recommendation),
+         "recommendationReason"    = COALESCE(item_decisions."recommendationReason", EXCLUDED."recommendationReason"),
+         "pricingEligible"         = TRUE,
+         "identifiedName"          = EXCLUDED."identifiedName",
+         "identifiedCategory"      = EXCLUDED."identifiedCategory",
+         "identifiedBrand"         = EXCLUDED."identifiedBrand",
+         "identifiedModel"         = EXCLUDED."identifiedModel",
+         "likelyModelOptions"      = NULL,
+         "requiresModelSelection"  = FALSE,
+         "identificationStatus"    = EXCLUDED."identificationStatus",
+         "identificationQuality"   = 'STRONG',
+         "updatedAt"               = NOW()::text`,
+      [
+        itemId,
+        edits.identifiedName,
+        edits.identifiedCategory,
+        edits.identifiedBrand ?? null,
+        edits.identifiedModel ?? null,
+        confirmed.identificationStatus ?? "EDITED",
+      ]
+    );
+
+    // Null out pricing fields in item_decisions — the subsequent generatePricing call
+    // will repopulate them via its own dual-write (Task 5).
+    await query(
+      `INSERT INTO item_decisions (
+         "itemId", intent, recommendation, "recommendationReason",
+         "priceFastSale", "priceFairMarket", "priceReach",
+         "pricingConfidence", "pricingReasoning",
+         "pricingSuggestedChannel", "pricingSaleSpeedBand", "pricingLastUpdatedAt",
+         "createdAt", "updatedAt"
+       )
+       VALUES ($1, 'undecided', 'SHIP', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NOW()::text, NOW()::text)
+       ON CONFLICT ("itemId") DO UPDATE SET
+         "priceFastSale"           = NULL,
+         "priceFairMarket"         = NULL,
+         "priceReach"              = NULL,
+         "pricingConfidence"       = NULL,
+         "pricingReasoning"        = NULL,
+         "pricingSuggestedChannel" = NULL,
+         "pricingSaleSpeedBand"    = NULL,
+         "pricingLastUpdatedAt"    = NULL,
+         "updatedAt"               = NOW()::text`,
+      [itemId]
+    );
+
     await query('DELETE FROM comparables WHERE "itemId" = $1', [itemId]);
 
     // 3. Run full pricing pipeline (now eligible).

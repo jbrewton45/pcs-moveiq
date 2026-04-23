@@ -14,69 +14,22 @@ import { AppLayout } from "./components/AppLayout";
 import { AuthScreen } from "./components/AuthScreen";
 import { ProfileView } from "./components/ProfileView";
 import { ProjectDetailView } from "./components/ProjectDetailView";
-import { ProjectForm } from "./components/ProjectForm";
-import { ProjectList } from "./components/ProjectList";
 import { PricingAnalysis } from "./components/PricingAnalysis";
 import { MoreView } from "./components/MoreView";
 import { SellDashboard } from "./components/dashboard/SellDashboard";
 import { ProviderSettings } from "./components/ProviderSettings";
 import { RoomDetailView } from "./components/RoomDetailView";
-import { ValuationView } from "./components/ValuationView";
-import { FloorplanView } from "./components/FloorplanView";
+import { RoomsView } from "./components/RoomsView";
+import { InventoryBrowser } from "./components/InventoryBrowser";
+import { HomeWorkspace } from "./components/HomeWorkspace";
+import { ActiveProjectProvider } from "./context/ActiveProjectContext";
+import { ToastProvider } from "./components/ui/Toast";
 import "./App.css";
 import "./styles/screens.css";
 import "./styles/ui.css";
 
 function HomeRoute() {
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [projectCount, setProjectCount] = useState<number | null>(null);
-  const [showCreateProject, setShowCreateProject] = useState(false);
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .listProjects()
-      .then((projects) => {
-        if (!cancelled) setProjectCount(projects.length);
-      })
-      .catch(() => {
-        if (!cancelled) setProjectCount(0);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshKey]);
-
-  const hasProjects = (projectCount ?? 0) > 0;
-  const canShowCreate = projectCount !== null && (!hasProjects || showCreateProject);
-
-  return (
-    <section className="stacked-view">
-      <ProjectList refreshKey={refreshKey} onSelect={(projectId) => navigate(`/projects/${projectId}`)} />
-      {hasProjects && (
-        <div className="inventory-home-actions">
-          <button
-            type="button"
-            className="inventory-home-actions__new-project"
-            onClick={() => setShowCreateProject((v) => !v)}
-          >
-            {showCreateProject ? "Hide Form" : "+ New Project"}
-          </button>
-        </div>
-      )}
-      {canShowCreate && (
-        <div style={{ padding: "0 16px 16px" }}>
-          <ProjectForm
-            onCreated={() => {
-              setRefreshKey((k) => k + 1);
-              setShowCreateProject(false);
-            }}
-          />
-        </div>
-      )}
-    </section>
-  );
+  return <HomeWorkspace />;
 }
 
 function ProjectRoute() {
@@ -136,7 +89,7 @@ function RoomRoute() {
       roomId={params.roomId}
       roomName={roomMeta.name}
       roomType={roomMeta.type}
-      onBack={() => navigate(`/projects/${params.projectId}`)}
+      onBack={() => navigate("/rooms")}
     />
   );
 }
@@ -167,15 +120,19 @@ function AuthedApp({ user, onLogout, onUserUpdate }: AuthedAppProps) {
     <Routes>
       <Route path="/" element={<AppLayout userName={user.displayName} onLogout={onLogout} />}>
         <Route index element={<HomeRoute />} />
+        <Route path="rooms" element={<RoomsView />} />
+        <Route path="inventory" element={<InventoryBrowser />} />
+        <Route path="sell" element={<DashboardRoute />} />
         <Route path="projects/:projectId" element={<ProjectRoute />} />
         <Route path="projects/:projectId/rooms/:roomId" element={<RoomRoute />} />
         <Route path="pricing" element={<PricingRoute />} />
-        <Route path="dashboard" element={<DashboardRoute />} />
-        <Route path="valuation" element={<ValuationView />} />
-        <Route path="floorplan" element={<FloorplanView />} />
         <Route path="more" element={<MoreRoute />} />
         <Route path="profile" element={<ProfileView user={user} onBack={() => navigate("/")} onUpdate={onUserUpdate} />} />
         <Route path="settings" element={<ProviderSettings onBack={() => navigate("/more")} />} />
+        {/* Legacy redirects */}
+        <Route path="dashboard" element={<Navigate to="/sell" replace />} />
+        <Route path="valuation" element={<Navigate to="/inventory" replace />} />
+        <Route path="floorplan" element={<Navigate to="/rooms" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
@@ -235,7 +192,11 @@ function App() {
 
   return (
     <BrowserRouter>
-      <AuthedApp user={user} onLogout={handleLogout} onUserUpdate={setUser} />
+      <ActiveProjectProvider>
+        <ToastProvider>
+          <AuthedApp user={user} onLogout={handleLogout} onUserUpdate={setUser} />
+        </ToastProvider>
+      </ActiveProjectProvider>
     </BrowserRouter>
   );
 }

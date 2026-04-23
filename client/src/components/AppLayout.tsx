@@ -17,10 +17,10 @@ function parseContext(pathname: string): { projectId?: string; roomId?: string }
 }
 
 function titleForPath(pathname: string): string {
-  if (pathname.startsWith("/projects/")) return "Inventory";
-  if (pathname.startsWith("/dashboard")) return "Dashboard";
-  if (pathname.startsWith("/valuation")) return "Valuation";
-  if (pathname.startsWith("/floorplan")) return "Floorplan";
+  if (pathname.startsWith("/rooms")) return "Rooms";
+  if (pathname.startsWith("/inventory")) return "Inventory";
+  if (pathname.startsWith("/sell")) return "Sell";
+  if (pathname.startsWith("/projects/")) return "Rooms";
   if (pathname.startsWith("/profile")) return "Profile";
   if (pathname.startsWith("/pricing")) return "Pricing";
   if (pathname.startsWith("/settings")) return "Settings";
@@ -139,17 +139,17 @@ export function AppLayout({ userName, onLogout }: Props) {
           <IconHome />
           <span>Home</span>
         </NavLink>
-        <NavLink to="/floorplan" className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
+        <NavLink to="/rooms" className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
           <IconMap />
-          <span>Floorplan</span>
+          <span>Rooms</span>
         </NavLink>
-        <NavLink to="/valuation" className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
-          <IconTrending />
-          <span>Valuation</span>
-        </NavLink>
-        <NavLink to="/dashboard" className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
+        <NavLink to="/inventory" className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
           <IconGrid />
-          <span>Dashboard</span>
+          <span>Inventory</span>
+        </NavLink>
+        <NavLink to="/sell" className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
+          <IconTrending />
+          <span>Sell</span>
         </NavLink>
         <NavLink to="/more" className={({ isActive }) => `homer-tab ${isActive ? "homer-tab--active" : ""}`}>
           <IconMore />

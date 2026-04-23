@@ -55,7 +55,13 @@ export async function postItem(req: Request, res: Response) {
     return res.status(400).json({ error: "Room does not belong to this project" });
   }
 
-  const item = await createItem(result.data);
+  let item = await createItem(result.data);
+  // If the caller supplied an intent field, record the decision via applyItemAction
+  // so item_decisions is populated immediately after item creation.
+  if (result.data.intent) {
+    const intentResult = await applyItemAction(item.id, result.data.intent);
+    if (intentResult) item = intentResult.item;
+  }
   return res.status(201).json(item);
 }
 
@@ -186,6 +192,9 @@ export async function parseVoice(req: Request, res: Response) {
     return res.status(400).json({ error: "transcript is required" });
   }
   const result = await parseVoiceTranscript(transcript.trim(), roomType);
+  if (result.sentimental && result.notes != null) {
+    result.notes = "[Sentimental] " + result.notes;
+  }
   return res.status(200).json(result);
 }
 
@@ -206,10 +215,16 @@ export async function parseVoicePhoto(req: Request, res: Response) {
     const result = await parseVoiceWithPhoto(hasTranscript ? transcript!.trim() : "", file.filename, roomType);
     const filePath = path.join(process.cwd(), "uploads", file.filename);
     fs.unlink(filePath, () => {});
+    if (result.sentimental && result.notes != null) {
+      result.notes = "[Sentimental] " + result.notes;
+    }
     return res.status(200).json(result);
   }
 
   const result = await parseVoiceTranscript(transcript!.trim(), roomType);
+  if (result.sentimental && result.notes != null) {
+    result.notes = "[Sentimental] " + result.notes;
+  }
   return res.status(200).json(result);
 }
 

@@ -8,6 +8,8 @@ import { BottomSheet } from "./ui/BottomSheet";
 import { ConfirmSheet } from "./ui/ConfirmSheet";
 import { RoomViewer } from "./RoomViewer";
 import { FixItemPanel } from "./FixItemPanel";
+import { formatItemDisplay } from "../utils/formatItemDisplay";
+import { useToast } from "./ui/Toast";
 
 function label(s: string) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -24,10 +26,17 @@ const BULK_ACTION_COLOR: Record<DecisionBucket, string> = {
   donate: "#eab308",
 };
 const BULK_ACTION_LABEL: Record<DecisionBucket, string> = {
-  sell: "Sell",
-  keep: "Keep",
-  ship: "Ship",
-  donate: "Donate",
+  sell: "Plan to Sell",
+  keep: "Plan to Keep",
+  ship: "Plan to Ship",
+  donate: "Plan to Donate",
+};
+
+const PLAN_ACTION_VERB: Record<DecisionBucket, string> = {
+  sell: "sell",
+  keep: "keep",
+  ship: "ship",
+  donate: "donate",
 };
 
 const REC_BADGE_TEXT: Record<Recommendation, string> = {
@@ -246,7 +255,7 @@ interface MarkDonePopoverProps {
   item: Item;
   actioning: boolean;
   errorMsg: string | null;
-  onMarkAction: (itemId: string, action: "sold" | "donate" | "discarded" | "shipped", soldPriceUsd?: number) => Promise<boolean>;
+  onMarkAction: (itemId: string, action: "sold" | "donated" | "discarded" | "shipped", soldPriceUsd?: number) => Promise<boolean>;
 }
 
 function MarkDonePopover({ item, actioning, errorMsg, onMarkAction }: MarkDonePopoverProps) {
@@ -254,7 +263,7 @@ function MarkDonePopover({ item, actioning, errorMsg, onMarkAction }: MarkDonePo
   const [showPriceInput, setShowPriceInput] = useState(false);
   const [soldPrice, setSoldPrice] = useState("");
 
-  async function handleNonSoldAction(action: "donate" | "discarded" | "shipped") {
+  async function handleNonSoldAction(action: "donated" | "discarded" | "shipped") {
     const ok = await onMarkAction(item.id, action);
     if (ok) setShowOptions(false);
   }
@@ -331,7 +340,7 @@ function MarkDonePopover({ item, actioning, errorMsg, onMarkAction }: MarkDonePo
                 type="button"
                 className="mark-done-popover__option"
                 disabled={actioning}
-                onClick={() => void handleNonSoldAction("donate")}
+                onClick={() => void handleNonSoldAction("donated")}
               >
                 {actioning ? "..." : "Donated"}
               </button>
@@ -392,7 +401,8 @@ interface ItemReadCardProps {
   }) => Promise<boolean>;
   correcting: boolean;
   correctError: string | null;
-  onMarkAction: (itemId: string, action: "sold" | "donate" | "discarded" | "shipped", soldPriceUsd?: number) => Promise<boolean>;
+  onMarkAction: (itemId: string, action: "sold" | "donated" | "discarded" | "shipped", soldPriceUsd?: number) => Promise<boolean>;
+  onPlanAction: (itemId: string, action: "sell" | "keep" | "ship" | "donate") => Promise<boolean>;
   actioning: boolean;
   actionError: string | null;
 }
@@ -403,13 +413,13 @@ function ItemReadCard({
   selected,
   onToggleSelect,
   onEdit,
-  onIdentify,
+  onIdentify: _onIdentify,
   onPricing,
-  onConfirm,
+  onConfirm: _onConfirm,
   onItemUpdated,
   identifying,
   pricing,
-  confirming,
+  confirming: _confirming,
   comparables,
   identifyError,
   identifyErrorMsg,
@@ -425,6 +435,7 @@ function ItemReadCard({
   correcting,
   correctError,
   onMarkAction,
+  onPlanAction,
   actioning,
   actionError,
 }: ItemReadCardProps) {
@@ -434,6 +445,7 @@ function ItemReadCard({
   const isWeak = quality === "WEAK";
   const isMedium = quality === "MEDIUM";
   const isItemCompleted_ = isCompleted(item);
+  const itemDisplay = formatItemDisplay(item);
   const showModelPrompt =
     !isWeak &&
     !isItemCompleted_ &&
@@ -505,13 +517,17 @@ function ItemReadCard({
               onError={(e) => { e.currentTarget.style.display = "none"; }}
             />
           )}
-          <span className="item-card__name">{item.itemName}</span>
+          <span
+            className={`item-card__name${itemDisplay.isWeakName ? " item-card__name--weak" : ""}`}
+          >
+            {itemDisplay.displayName}
+          </span>
           {!selectMode && (
             <button className="item-card__edit-btn" type="button" onClick={() => onEdit(item.id)}>
               Edit
             </button>
           )}
-          <RecBadge recommendation={item.recommendation} />
+          {!isWeak && <RecBadge recommendation={item.recommendation} />}
           {isItemCompleted_ && (
             <span className={`completion-badge completion-badge--${item.status.toLowerCase()}`}>
               {item.status === "SOLD" && item.soldPriceUsd != null
@@ -524,7 +540,9 @@ function ItemReadCard({
           <p className="item-card__rec-reason">{item.recommendationReason}</p>
         )}
         <div className="item-card__meta">
-          <span>{item.category}</span>
+          <span className={itemDisplay.isWeakCategory ? "item-card__meta--weak" : undefined}>
+            {itemDisplay.displayCategory}
+          </span>
           <span>|</span>
           <span>{label(item.condition)}</span>
           <span>|</span>
@@ -806,6 +824,38 @@ function ItemReadCard({
                 </button>
               </>
             )}
+          </div>
+        )}
+
+        {!selectMode && !isItemCompleted_ && hasPricing && !isWeak && (
+          <div className="item-card__plan-row" style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 8,
+            marginTop: 12,
+          }}>
+            {(BULK_ACTION_BUCKETS as readonly DecisionBucket[]).map((a) => (
+              <button
+                key={a}
+                type="button"
+                className="item-card__plan-btn"
+                disabled={actioning}
+                onClick={() => void onPlanAction(item.id, a)}
+                style={{
+                  background: BULK_ACTION_COLOR[a],
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: actioning ? "not-allowed" : "pointer",
+                  opacity: actioning ? 0.6 : 1,
+                }}
+              >
+                {BULK_ACTION_LABEL[a]}
+              </button>
+            ))}
           </div>
         )}
 
@@ -1146,6 +1196,7 @@ export function RoomDetailView({
   roomType,
   onBack,
 }: Props) {
+  const { showToast } = useToast();
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -1494,15 +1545,40 @@ export function RoomDetailView({
       const result = await api.correctAndReprice(itemId, edits);
       setItems(prev => prev.map(i => (i.id === itemId ? result.item : i)));
       setComparables(prev => ({ ...prev, [itemId]: result.comparables }));
+      showToast("Saved — re-pricing with your details");
       return true;
     } catch (err) {
       setCorrectErrorByItem(prev => ({
         ...prev,
         [itemId]: err instanceof Error ? err.message : "Correction failed",
       }));
+      showToast("Save failed — try again", "error");
       return false;
     } finally {
       setCorrectingId(null);
+    }
+  }
+
+  async function handlePlanAction(
+    itemId: string,
+    action: "sell" | "keep" | "ship" | "donate",
+  ): Promise<boolean> {
+    setActionBusyId(itemId);
+    setActionErrorByItem(prev => { const n = { ...prev }; delete n[itemId]; return n; });
+    try {
+      const updated = await api.applyItemAction(itemId, action);
+      setItems(prev => prev.map(i => (i.id === itemId ? updated : i)));
+      showToast(`Planned to ${PLAN_ACTION_VERB[action]}`);
+      return true;
+    } catch (err) {
+      setActionErrorByItem(prev => ({
+        ...prev,
+        [itemId]: err instanceof Error ? err.message : "Action failed",
+      }));
+      showToast("Couldn't save that plan — try again", "error");
+      return false;
+    } finally {
+      setActionBusyId(null);
     }
   }
 
@@ -1511,7 +1587,7 @@ export function RoomDetailView({
 
   async function handleMarkAction(
     itemId: string,
-    action: "sold" | "donate" | "discarded" | "shipped",
+    action: "sold" | "donated" | "discarded" | "shipped",
     soldPriceUsd?: number,
   ): Promise<boolean> {
     setActionBusyId(itemId);
@@ -1519,12 +1595,19 @@ export function RoomDetailView({
     try {
       const updated = await api.applyItemAction(itemId, action, soldPriceUsd !== undefined ? { soldPriceUsd } : {});
       setItems(prev => prev.map(i => (i.id === itemId ? updated : i)));
+      const verb =
+        action === "sold" ? "sold"
+        : action === "donated" ? "donated"
+        : action === "shipped" ? "shipped"
+        : "discarded";
+      showToast(`Marked ${verb}`);
       return true;
     } catch (err) {
       setActionErrorByItem(prev => ({
         ...prev,
         [itemId]: err instanceof Error ? err.message : "Action failed",
       }));
+      showToast("Action failed — try again", "error");
       return false;
     } finally {
       setActionBusyId(null);
@@ -1810,6 +1893,7 @@ export function RoomDetailView({
                 correcting={correctingId === item.id}
                 correctError={correctErrorByItem[item.id] ?? null}
                 onMarkAction={handleMarkAction}
+                onPlanAction={handlePlanAction}
                 actioning={actionBusyId === item.id}
                 actionError={actionErrorByItem[item.id] ?? null}
               />

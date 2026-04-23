@@ -214,5 +214,152 @@ export async function initializeSchema() {
     -- requiresModelSelection signals the frontend to prompt the user to pick.
     ALTER TABLE items ADD COLUMN IF NOT EXISTS "likelyModelOptions"     TEXT;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS "requiresModelSelection" BOOLEAN NOT NULL DEFAULT FALSE;
+
+    -- ─────────────────────────────────────────────────────────────────────
+    --  Phase 1 — Inventory / Decision layer split (additive, idempotent).
+    --  Introduces the two-layer model without dropping any legacy column.
+    --  Dual-write / column drops happen in later migration phases.
+    -- ─────────────────────────────────────────────────────────────────────
+
+    -- Inventory-layer additions to items.
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS brand          TEXT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS model          TEXT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS "serialNumber" TEXT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS quantity       INTEGER NOT NULL DEFAULT 1;
+
+    -- Relax NOT NULL on recommendation so createItem can write inventory-only rows.
+    -- The column itself is kept for backward compatibility; physically dropped in Phase 4.
+    ALTER TABLE items ALTER COLUMN recommendation DROP NOT NULL;
+
+    -- Decision layer — one row per item_id when the user has engaged past bare creation.
+    -- Intent enum values: sell | keep | ship | donate | undecided | discarded.
+    CREATE TABLE IF NOT EXISTS item_decisions (
+      "itemId"                  TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+      intent                    TEXT NOT NULL DEFAULT 'undecided',
+      recommendation            TEXT NOT NULL,
+      "recommendationReason"    TEXT,
+      "urgencyBucket"           TEXT, -- populated in Phase 3; currently computed at read-time only, not persisted
+      "pricingEligible"         BOOLEAN,
+      "priceFastSale"           DOUBLE PRECISION,
+      "priceFairMarket"         DOUBLE PRECISION,
+      "priceReach"              DOUBLE PRECISION,
+      "pricingConfidence"       DOUBLE PRECISION,
+      "pricingReasoning"        TEXT,
+      "pricingSuggestedChannel" TEXT,
+      "pricingSaleSpeedBand"    TEXT,
+      "pricingLastUpdatedAt"    TEXT,
+      "identifiedName"          TEXT,
+      "identifiedCategory"      TEXT,
+      "identifiedBrand"         TEXT,
+      "identifiedModel"         TEXT,
+      "likelyModelOptions"      TEXT,
+      "requiresModelSelection"  BOOLEAN NOT NULL DEFAULT FALSE,
+      "identificationConfidence" DOUBLE PRECISION,
+      "identificationReasoning" TEXT,
+      "identificationStatus"    TEXT NOT NULL DEFAULT 'NONE',
+      "identificationQuality"   TEXT,
+      "pendingClarifications"   TEXT,
+      "clarificationAnswers"    TEXT,
+      "listingUrl"              TEXT,
+      "soldPriceUsd"            DOUBLE PRECISION,
+      "decidedAt"               TEXT,
+      "completedAt"             TEXT,
+      "createdAt"               TEXT NOT NULL,
+      "updatedAt"               TEXT NOT NULL
+    );
+
+    -- Receipt photos — separate from item_photos (product imagery) for clean semantics.
+    CREATE TABLE IF NOT EXISTS receipt_photos (
+      id          TEXT PRIMARY KEY,
+      "itemId"    TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      "photoPath" TEXT NOT NULL,
+      "createdAt" TEXT NOT NULL
+    );
+
+    -- Indexes: hot paths for Phase-2 reads.
+    CREATE INDEX IF NOT EXISTS items_room_id_idx            ON items ("roomId");
+    CREATE INDEX IF NOT EXISTS items_project_id_idx         ON items ("projectId");
+    CREATE INDEX IF NOT EXISTS item_decisions_completed_idx ON item_decisions ("completedAt") WHERE "completedAt" IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS item_decisions_intent_idx    ON item_decisions (intent);
+    CREATE INDEX IF NOT EXISTS receipt_photos_item_id_idx   ON receipt_photos ("itemId");
+
+    -- ── Backfill (idempotent via ON CONFLICT DO NOTHING on item_decisions PK) ──
+
+    -- Primary: for every item with user engagement past bare creation, insert a
+    -- decision row. Discriminator per approved design:
+    --   status != 'UNREVIEWED'  OR  identificationStatus != 'NONE'
+    INSERT INTO item_decisions (
+      "itemId", intent, recommendation, "recommendationReason",
+      "pricingEligible", "priceFastSale", "priceFairMarket", "priceReach",
+      "pricingConfidence", "pricingReasoning", "pricingSuggestedChannel",
+      "pricingSaleSpeedBand", "pricingLastUpdatedAt",
+      "identifiedName", "identifiedCategory", "identifiedBrand", "identifiedModel",
+      "likelyModelOptions", "requiresModelSelection",
+      "identificationConfidence", "identificationReasoning",
+      "identificationStatus", "identificationQuality",
+      "pendingClarifications", "clarificationAnswers",
+      "listingUrl", "soldPriceUsd",
+      "decidedAt", "completedAt",
+      "createdAt", "updatedAt"
+    )
+    SELECT
+      i.id,
+      CASE i.status
+        WHEN 'LISTED'    THEN 'sell'
+        WHEN 'KEPT'      THEN 'keep'
+        WHEN 'SOLD'      THEN 'sell'
+        WHEN 'SHIPPED'   THEN 'ship'
+        WHEN 'DONATED'  THEN 'donate'
+        WHEN 'DISCARDED' THEN 'discarded'
+        ELSE                   'undecided'
+      END AS intent,
+      COALESCE(i.recommendation, 'KEEP') AS recommendation,
+      i."recommendationReason",
+      i."pricingEligible", i."priceFastSale", i."priceFairMarket", i."priceReach",
+      i."pricingConfidence", i."pricingReasoning", i."pricingSuggestedChannel",
+      i."pricingSaleSpeedBand", i."pricingLastUpdatedAt",
+      i."identifiedName", i."identifiedCategory", i."identifiedBrand", i."identifiedModel",
+      i."likelyModelOptions", COALESCE(i."requiresModelSelection", FALSE),
+      i."identificationConfidence", i."identificationReasoning",
+      COALESCE(i."identificationStatus", 'NONE'), i."identificationQuality",
+      i."pendingClarifications", i."clarificationAnswers",
+      i."listingUrl", i."soldPriceUsd",
+      CASE
+        WHEN i.status = 'DISCARDED' THEN NULL
+        ELSE i."updatedAt"
+      END AS "decidedAt",
+      i."completedAt",
+      NOW()::text,
+      NOW()::text
+    FROM items i
+    WHERE i.status <> 'UNREVIEWED'
+       OR COALESCE(i."identificationStatus", 'NONE') <> 'NONE'
+    ON CONFLICT ("itemId") DO NOTHING;
+
+    -- Supplementary: keepFlag = TRUE rows that didn't qualify under the primary
+    -- discriminator (e.g. UNREVIEWED + identificationStatus NONE + keepFlag TRUE).
+    INSERT INTO item_decisions (
+      "itemId", intent, recommendation, "decidedAt", "createdAt", "updatedAt"
+    )
+    SELECT
+      i.id,
+      'keep',
+      COALESCE(i.recommendation, 'KEEP'),
+      i."updatedAt",
+      NOW()::text,
+      NOW()::text
+    FROM items i
+    WHERE i."keepFlag" = TRUE
+    ON CONFLICT ("itemId") DO NOTHING;
+
+    -- Supplementary: sentimental flag becomes a free-text note.
+    -- Guarded with LIKE to keep the migration idempotent across re-runs.
+    UPDATE items
+       SET notes = CASE
+         WHEN notes IS NULL OR notes = '' THEN '[Sentimental]'
+         ELSE notes || ' [Sentimental]'
+       END
+     WHERE "sentimentalFlag" = TRUE
+       AND (notes IS NULL OR notes NOT LIKE '%[Sentimental]%');
   `);
 }
