@@ -5,6 +5,7 @@ import { api } from "../api";
 import { useActiveProject } from "../context/ActiveProjectContext";
 import { hasUnsyncedScan, getScanData } from "../plugins/scanStore";
 import { countWeakItems } from "../utils/formatItemDisplay";
+import { SkeletonList } from "./ui/Skeleton";
 
 const ROOM_EMOJIS: Record<string, string> = {
   "Living Room": "🛋️",
@@ -178,7 +179,7 @@ export function RoomsView() {
     return () => { cancelled = true; };
   }, [selectedProject]);
 
-  if (loading) return <p className="loading">Loading rooms...</p>;
+  if (loading) return <SkeletonList count={4} label="Loading rooms" />;
   if (projects.length === 0) {
     return (
       <section className="stacked-view" style={{ padding: 24, textAlign: "center" }}>

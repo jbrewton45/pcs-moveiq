@@ -6,6 +6,7 @@ import { PriorityPanel } from "./PriorityPanel";
 import { RevenueSummary } from "./RevenueSummary";
 import { CalibrationPanel } from "./CalibrationPanel";
 import { ProgressBar } from "./ProgressBar";
+import { SkeletonList } from "./ui/Skeleton";
 import { isCompletedItem, itemPrimaryLabel } from "../utils/itemStatus";
 
 function formatDate(iso: string) {
@@ -171,7 +172,7 @@ function PackingListView({ projectId }: { projectId: string; onBack: () => void 
     api.getProjectExport(projectId).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
   }, [projectId]);
 
-  if (loading) return <p className="loading">Loading packing list...</p>;
+  if (loading) return <SkeletonList count={3} label="Loading packing list" />;
   if (!data) return <p className="empty">Failed to load packing list.</p>;
 
   const roomMap = new Map(data.rooms.map(r => [r.id, r.roomName]));
@@ -528,7 +529,7 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
     }
   }
 
-  if (loadingProject) return <p className="loading">Loading project...</p>;
+  if (loadingProject) return <SkeletonList count={3} label="Loading project" />;
   if (!project) return <p className="empty">Project not found.</p>;
 
   // Packing list view — check before editingProject
@@ -842,7 +843,7 @@ export function ProjectDetailView({ projectId, onBack, onSelectRoom, roomsRefres
             <h3 className="section-heading">Rooms</h3>
 
             {loadingRooms ? (
-              <p className="loading">Loading rooms...</p>
+              <SkeletonList count={3} label="Loading rooms" />
             ) : rooms.length === 0 ? (
               <p className="empty">No rooms yet. Add one below.</p>
             ) : (

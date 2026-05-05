@@ -9,10 +9,14 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "cap:sync": "cap sync android",
-    "cap:build": "npm run build && cap sync android"
+    "cap:build": "npm run build && cap sync android",
+    "cap:sync:ios": "cap sync ios",
+    "cap:build:ios": "npm run build && cap sync ios",
+    "cap:open:ios": "cap open ios"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.0",
+    "@capacitor/app": "^8.1.0",
     "@capacitor/core": "^8.3.0",
     "@capacitor/ios": "^8.3.0",
     "react": "^19.2.4",

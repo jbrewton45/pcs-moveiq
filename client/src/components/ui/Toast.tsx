@@ -2,14 +2,20 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 type ToastTone = "success" | "info" | "error";
 
+export interface ToastOptions {
+  /** When true the toast stays until tapped. Defaults to true for tone="error", false otherwise. */
+  persist?: boolean;
+}
+
 interface ToastItem {
   id: number;
   message: string;
   tone: ToastTone;
+  persist: boolean;
 }
 
 interface ToastApi {
-  showToast: (message: string, tone?: ToastTone) => void;
+  showToast: (message: string, tone?: ToastTone, options?: ToastOptions) => void;
 }
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -24,10 +30,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setItems((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const showToast = useCallback((message: string, tone: ToastTone = "success") => {
+  const showToast = useCallback((message: string, tone: ToastTone = "success", options?: ToastOptions) => {
     const id = nextId.current++;
-    setItems((prev) => [...prev, { id, message, tone }]);
-    window.setTimeout(() => dismiss(id), TOAST_MS);
+    const persist = options?.persist ?? (tone === "error");
+    setItems((prev) => [...prev, { id, message, tone, persist }]);
+    if (!persist) {
+      window.setTimeout(() => dismiss(id), TOAST_MS);
+    }
   }, [dismiss]);
 
   const api = useMemo<ToastApi>(() => ({ showToast }), [showToast]);
@@ -75,6 +84,7 @@ function ToastRow({ item, onDismiss }: { item: ToastItem; onDismiss: () => void 
     <button
       type="button"
       onClick={onDismiss}
+      aria-label={item.persist ? "Dismiss notification" : undefined}
       style={{
         pointerEvents: "auto",
         maxWidth: 420,
@@ -82,7 +92,8 @@ function ToastRow({ item, onDismiss }: { item: ToastItem; onDismiss: () => void 
         color: c.fg,
         border: `1px solid ${c.border}`,
         borderRadius: 999,
-        padding: "8px 16px",
+        padding: "10px 18px",
+        minHeight: 44,
         fontSize: 14,
         fontWeight: 600,
         boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
@@ -93,6 +104,7 @@ function ToastRow({ item, onDismiss }: { item: ToastItem; onDismiss: () => void 
       }}
     >
       {item.message}
+      {item.persist && <span style={{ marginLeft: 10, opacity: 0.85, fontWeight: 400 }}>· tap to dismiss</span>}
     </button>
   );
 }

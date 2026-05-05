@@ -10,6 +10,9 @@ import { RoomViewer } from "./RoomViewer";
 import { FixItemPanel } from "./FixItemPanel";
 import { formatItemDisplay } from "../utils/formatItemDisplay";
 import { useToast } from "./ui/Toast";
+import { SkeletonList } from "./ui/Skeleton";
+import { RoomScanPlugin } from "../plugins/RoomScanPlugin";
+import { saveSynced as saveSyncedScan } from "../plugins/scanStore";
 
 function label(s: string) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -368,6 +371,264 @@ function MarkDonePopover({ item, actioning, errorMsg, onMarkAction }: MarkDonePo
   );
 }
 
+// ---------- PhotoProcessingBadge ----------
+// Tiny overlay on items currently in the optimistic photo-add pipeline.
+// Stage labels stream as the background chain progresses; on error it shows a
+// Retry button that re-runs from the last failed step (handled by the parent).
+const PHOTO_BADGE_LABEL: Record<"uploading" | "identifying" | "pricing" | "error", string> = {
+  uploading: "Uploading photo…",
+  identifying: "Identifying…",
+  pricing: "Pricing…",
+  error: "Error",
+};
+
+function PhotoProcessingBadge({
+  stage,
+  errorMessage,
+  onRetry,
+}: {
+  stage: "uploading" | "identifying" | "pricing" | "error";
+  errorMessage?: string;
+  onRetry: () => void;
+}) {
+  const isError = stage === "error";
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: "absolute",
+        top: 8,
+        right: 8,
+        zIndex: 2,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 12px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 600,
+        background: isError ? "rgba(239,68,68,0.95)" : "rgba(59,130,246,0.95)",
+        color: "#fff",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+        maxWidth: "calc(100% - 16px)",
+      }}
+      title={isError && errorMessage ? errorMessage : undefined}
+    >
+      {!isError && (
+        <span
+          aria-hidden
+          style={{
+            width: 10, height: 10, borderRadius: "50%",
+            border: "2px solid currentColor", borderTopColor: "transparent",
+            animation: "moveiq-skeleton-pulse 1s linear infinite",
+            display: "inline-block",
+          }}
+        />
+      )}
+      <span>{PHOTO_BADGE_LABEL[stage]}</span>
+      {isError && (
+        <button
+          type="button"
+          onClick={onRetry}
+          style={{
+            marginLeft: 4,
+            padding: "4px 10px",
+            minHeight: 28,
+            border: "1px solid rgba(255,255,255,0.7)",
+            borderRadius: 999,
+            background: "transparent",
+            color: "#fff",
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------- PostAddNudge ----------
+// Subtle inline row rendered under the most-recently-added item card. Offers
+// "Add another" plus the four plan actions, so the user keeps adding without
+// being yanked into a decision context. Disappears on first interaction.
+function PostAddNudge({
+  compact,
+  onAddAnother,
+  onPlan,
+  onDismiss,
+}: {
+  compact: boolean;
+  onAddAnother: () => void;
+  onPlan: (action: "sell" | "keep" | "ship" | "donate") => void | Promise<void>;
+  onDismiss: () => void;
+}) {
+  const planButtons: Array<{ label: string; action: "sell" | "keep" | "ship" | "donate"; color: string }> = [
+    { label: "Sell",   action: "sell",   color: "#ef4444" },
+    { label: "Keep",   action: "keep",   color: "#22c55e" },
+    { label: "Ship",   action: "ship",   color: "#3b82f6" },
+    { label: "Donate", action: "donate", color: "#eab308" },
+  ];
+  return (
+    <div
+      role="region"
+      aria-label="Just added"
+      style={{
+        marginTop: 6,
+        marginBottom: 12,
+        padding: compact ? "6px 8px" : "8px 10px",
+        background: "var(--bg-card, rgba(59,130,246,0.06))",
+        border: "1px dashed var(--border-soft, rgba(255,255,255,0.12))",
+        borderRadius: 10,
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 12,
+        color: "var(--text-secondary, #94a3b8)",
+      }}
+    >
+      {!compact && <span style={{ marginRight: "auto", fontWeight: 600 }}>Just added · what next?</span>}
+      <button
+        type="button"
+        onClick={onAddAnother}
+        style={{
+          marginRight: compact ? "auto" : undefined,
+          minHeight: 32,
+          padding: "6px 12px",
+          borderRadius: 999,
+          border: "1px solid var(--signal, #3b82f6)",
+          background: "transparent",
+          color: "var(--signal, #3b82f6)",
+          fontWeight: 700,
+          fontSize: 12,
+          cursor: "pointer",
+        }}
+      >
+        + Add another
+      </button>
+      {!compact && planButtons.map(b => (
+        <button
+          key={b.action}
+          type="button"
+          onClick={() => void onPlan(b.action)}
+          style={{
+            minHeight: 32,
+            padding: "6px 10px",
+            borderRadius: 999,
+            border: `1px solid ${b.color}`,
+            background: "transparent",
+            color: b.color,
+            fontWeight: 700,
+            fontSize: 12,
+            cursor: "pointer",
+          }}
+        >
+          {b.label}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        style={{
+          minHeight: 28,
+          minWidth: 28,
+          padding: "2px 8px",
+          borderRadius: 999,
+          border: "none",
+          background: "transparent",
+          color: "var(--text-muted, #64748b)",
+          fontSize: 14,
+          cursor: "pointer",
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+// ---------- DoneRoomNudge ----------
+// Floating dismissible banner that appears after ~12s of inactivity inside
+// the room. Offers Review (scroll to top) or Next room (back to project).
+function DoneRoomNudge({
+  onReview,
+  onNextRoom,
+  onDismiss,
+}: {
+  onReview: () => void;
+  onNextRoom: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-label="Done with this room?"
+      style={{
+        position: "fixed",
+        left: 16,
+        right: 16,
+        bottom: `calc(96px + env(safe-area-inset-bottom))`,
+        zIndex: 50,
+        margin: "0 auto",
+        maxWidth: 480,
+        padding: "10px 12px",
+        background: "var(--bg-elevated, rgba(15,23,42,0.96))",
+        border: "1px solid var(--border-soft, rgba(255,255,255,0.12))",
+        borderRadius: 12,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        fontSize: 13,
+        color: "var(--text-primary, #f1f5f9)",
+      }}
+    >
+      <span style={{ fontWeight: 600, marginRight: "auto" }}>Done with this room?</span>
+      <button
+        type="button"
+        onClick={onReview}
+        style={{
+          minHeight: 32, padding: "6px 12px", borderRadius: 999,
+          border: "1px solid var(--border-soft, rgba(255,255,255,0.18))",
+          background: "transparent", color: "inherit",
+          fontWeight: 600, fontSize: 12, cursor: "pointer",
+        }}
+      >
+        Review items
+      </button>
+      <button
+        type="button"
+        onClick={onNextRoom}
+        style={{
+          minHeight: 32, padding: "6px 12px", borderRadius: 999,
+          border: "1px solid var(--signal, #3b82f6)",
+          background: "var(--signal, #3b82f6)", color: "#fff",
+          fontWeight: 700, fontSize: 12, cursor: "pointer",
+        }}
+      >
+        Next room
+      </button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        style={{
+          minHeight: 28, minWidth: 28, padding: "0 6px",
+          borderRadius: 999, border: "none", background: "transparent",
+          color: "var(--text-muted, #64748b)", fontSize: 16, cursor: "pointer",
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 // ---------- ItemReadCard ----------
 interface ItemReadCardProps {
   item: Item;
@@ -439,6 +700,7 @@ function ItemReadCard({
   actioning,
   actionError,
 }: ItemReadCardProps) {
+  const { showToast } = useToast();
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submittingClarifications, setSubmittingClarifications] = useState(false);
   const quality = item.identificationQuality ?? "STRONG";
@@ -695,8 +957,9 @@ function ItemReadCard({
                       onItemUpdated?.(updated);
                       setAnswers({});
                       await onPricing(item.id);
-                    } catch {
-                      // show error silently
+                    } catch (err) {
+                      const msg = err instanceof Error ? err.message : "Could not submit clarifications";
+                      showToast(`Clarifications failed: ${msg}`, "error", { persist: true });
                     } finally {
                       setSubmittingClarifications(false);
                     }
@@ -1159,6 +1422,200 @@ export function RoomDetailView({
   const [identifyErrorMsg, setIdentifyErrorMsg] = useState<string | null>(null);
   const [identifyWarning, setIdentifyWarning] = useState<string | null>(null);
   const [pricingError, setPricingError] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [quickAddStep, setQuickAddStep] = useState<"creating" | "uploading" | "identifying" | "pricing" | null>(null);
+
+  const QUICK_ADD_STEP_LABEL: Record<NonNullable<typeof quickAddStep>, string> = {
+    creating: "Creating item…",
+    uploading: "Uploading photo…",
+    identifying: "Identifying item…",
+    pricing: "Getting pricing…",
+  };
+
+  // ── Optimistic photo-add: per-item background-processing state ────────────
+  // Items appear in the list immediately after createItem succeeds; the photo
+  // upload, identification, and pricing run in the background and stream their
+  // progress through this map. Retry restarts from the last failed step.
+  type PhotoStage = "uploading" | "identifying" | "pricing" | "error";
+  type PhotoCheckpoint = "create" | "upload" | "identify" | "price";
+  interface PendingPhoto {
+    stage: PhotoStage;
+    errorMessage?: string;
+    file: File;
+    checkpoint: PhotoCheckpoint;
+  }
+  const [pendingPhotos, setPendingPhotos] = useState<Record<string, PendingPhoto>>({});
+  const pendingPhotosRef = useRef<Record<string, PendingPhoto>>({});
+  useEffect(() => { pendingPhotosRef.current = pendingPhotos; }, [pendingPhotos]);
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Cleanup orphans: any item that never got past the createItem step is
+      // a useless stub on the server. Best-effort delete.
+      for (const [id, p] of Object.entries(pendingPhotosRef.current)) {
+        if (p.checkpoint === "create") {
+          api.deleteItem(id).catch(() => {});
+        }
+      }
+    };
+  }, []);
+
+  function patchPending(id: string, patch: Partial<PendingPhoto>) {
+    setPendingPhotos(prev => {
+      const cur = prev[id];
+      if (!cur) return prev;
+      return { ...prev, [id]: { ...cur, ...patch } };
+    });
+  }
+  function clearPending(id: string) {
+    setPendingPhotos(prev => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
+  async function runPhotoChain(itemId: string, file: File, startFrom: PhotoCheckpoint = "create") {
+    try {
+      if (startFrom === "create" || startFrom === "upload") {
+        patchPending(itemId, { stage: "uploading", errorMessage: undefined });
+        await api.uploadItemPhoto(itemId, file);
+        if (!isMountedRef.current) return;
+        patchPending(itemId, { checkpoint: "upload" });
+      }
+      patchPending(itemId, { stage: "identifying" });
+      await api.identifyItem(itemId);
+      if (!isMountedRef.current) return;
+      patchPending(itemId, { checkpoint: "identify" });
+
+      patchPending(itemId, { stage: "pricing" });
+      const result = await api.getItemPricing(itemId);
+      if (!isMountedRef.current) return;
+      setComparables(prev => ({ ...prev, [itemId]: result.comparables }));
+      patchPending(itemId, { checkpoint: "price" });
+
+      // Done — drop from pending and refresh canonical items so the card
+      // shows the AI-resolved name / category / pricing.
+      clearPending(itemId);
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      const reason = err instanceof Error ? err.message : "Could not process item.";
+      patchPending(itemId, { stage: "error", errorMessage: reason });
+      showToast(`Photo flow failed: ${reason}`, "error", { persist: true });
+    }
+  }
+
+  function retryPendingPhoto(itemId: string) {
+    const cur = pendingPhotosRef.current[itemId];
+    if (!cur) return;
+    const startFrom: PhotoCheckpoint =
+      cur.checkpoint === "create" ? "upload" :
+      cur.checkpoint === "upload" ? "identify" :
+      cur.checkpoint === "identify" ? "price" :
+      "price";
+    void runPhotoChain(itemId, cur.file, startFrom);
+  }
+
+  // ── Post-add momentum: track the most recently added item id so we can
+  // render an inline "what's next?" row under that card. The row auto-clears
+  // on first interaction (Add another / Plan to …) so it never lingers.
+  // After the user has added 3+ items in this session the nudge collapses to
+  // a single "+ Add another" affordance — they've already learned the plan
+  // actions and don't need them re-prompted on every add.
+  const [lastAddedId, setLastAddedId] = useState<string | null>(null);
+  const [addCount, setAddCount] = useState(0);
+  // User-controlled auto-reopen of the Add Item sheet after each capture.
+  // Defaults to true (rapid-add momentum); flips off the moment the user
+  // dismisses the sheet by gesture/× and re-arms when they reopen it.
+  const [autoAddMode, setAutoAddMode] = useState(true);
+  const autoAddModeRef = useRef(autoAddMode);
+  useEffect(() => { autoAddModeRef.current = autoAddMode; }, [autoAddMode]);
+  const newItemAnchorRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!lastAddedId) return;
+    // Auto-scroll the freshly-added card into view; tolerant of the card
+    // not being mounted yet on the very first render after insertion.
+    const t = window.setTimeout(() => {
+      newItemAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
+    return () => window.clearTimeout(t);
+  }, [lastAddedId]);
+
+  function dismissPostAdd() {
+    setLastAddedId(null);
+  }
+
+  // ── Done-with-room nudge: after ~12 s of inactivity inside the room, surface
+  // a small dismissible banner suggesting Review or Next room. The timer
+  // resets on any meaningful interaction (add, plan, mark, edit, select,
+  // analyze, scroll). Once dismissed, it never re-appears in this session.
+  const [showDoneNudge, setShowDoneNudge] = useState(false);
+  const [doneNudgeDismissed, setDoneNudgeDismissed] = useState(false);
+  const [activityTick, setActivityTick] = useState(0);
+  useEffect(() => {
+    if (doneNudgeDismissed) return;
+    if (items.length === 0) return; // nothing to be "done with" yet
+    setShowDoneNudge(false);
+    const t = window.setTimeout(() => {
+      if (isMountedRef.current && !doneNudgeDismissed) setShowDoneNudge(true);
+    }, 12_000);
+    return () => window.clearTimeout(t);
+  }, [doneNudgeDismissed, items.length, addCount, lastAddedId, pendingPhotos, activityTick]);
+  // Any user interaction (scroll, tap, key) counts as activity and resets the
+  // 12-second inactivity timer above. Throttled to one tick per animation
+  // frame so we never thrash setState on rapid pointer streams.
+  useEffect(() => {
+    let raf = 0;
+    function bump() {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => { raf = 0; setActivityTick(n => n + 1); });
+    }
+    window.addEventListener("scroll", bump, { passive: true });
+    window.addEventListener("pointerdown", bump, { passive: true });
+    window.addEventListener("keydown", bump);
+    return () => {
+      window.removeEventListener("scroll", bump);
+      window.removeEventListener("pointerdown", bump);
+      window.removeEventListener("keydown", bump);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  const SCANNER_UNAVAILABLE_MSG =
+    "Room scanner could not start. Please verify this is a LiDAR-capable iPhone Pro/iPad Pro and try again.";
+
+  async function handleStartRoomScan() {
+    if (isScanning) return;
+    setIsScanning(true);
+    try {
+      const support = await RoomScanPlugin.checkSupport().catch(() => ({ supported: false }));
+      if (!support.supported) {
+        showToast(SCANNER_UNAVAILABLE_MSG, "error");
+        return;
+      }
+      const scan = await RoomScanPlugin.startScan();
+      try {
+        await api.putRoomScan(roomId, scan);
+        saveSyncedScan(roomId, scan);
+        showToast("Room scan saved", "success");
+      } catch (err) {
+        console.error("[RoomDetailView] putRoomScan failed", err);
+        showToast("Scan captured, but saving to server failed. We'll retry next time you open this room.", "error");
+      }
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/cancel/i.test(msg)) return; // user-initiated cancel — not an error
+      console.error("[RoomDetailView] startScan failed", err);
+      showToast(SCANNER_UNAVAILABLE_MSG, "error");
+    } finally {
+      setIsScanning(false);
+    }
+  }
 
   // Full analysis state (per-item)
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
@@ -1422,12 +1879,20 @@ export function RoomDetailView({
   }
 
   async function handleBulkDelete() {
-    await api.bulkDeleteItems(Array.from(selectedIds));
-    setSelectedIds(new Set());
-    setSelectMode(false);
-    setShowBulkSheet(false);
-    setConfirmBulkDelete(false);
-    setRefreshKey((k) => k + 1);
+    const count = selectedIds.size;
+    try {
+      await api.bulkDeleteItems(Array.from(selectedIds));
+      showToast(`${count} item${count === 1 ? "" : "s"} deleted`, "success");
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Bulk delete failed";
+      showToast(`Couldn't delete items: ${msg}`, "error", { persist: true });
+    } finally {
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      setShowBulkSheet(false);
+      setConfirmBulkDelete(false);
+    }
   }
 
   async function handleIdentify(itemId: string) {
@@ -1467,8 +1932,10 @@ export function RoomDetailView({
     try {
       await api.confirmIdentification(itemId);
       setRefreshKey(k => k + 1);
-    } catch { /* silent */ }
-    finally { setConfirming(false); }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Confirmation failed";
+      showToast(`Couldn't confirm: ${msg}`, "error", { persist: true });
+    } finally { setConfirming(false); }
   }
 
   const [correctingId, setCorrectingId] = useState<string | null>(null);
@@ -1598,11 +2065,16 @@ export function RoomDetailView({
   async function handlePhotoDrivenAdd(file: File) {
     setQuickAddBusy(true);
     setQuickAddError("");
+    setQuickAddStep("creating");
+    let created;
     try {
-      const created = await api.createItem({
+      // Photo-first creation: name + category are filled in by identifyItem(),
+      // so we send placeholders that satisfy CreateItemSchema (.min(1)) and let
+      // the Claude/OpenAI pass overwrite them with the real values.
+      created = await api.createItem({
         projectId,
         roomId,
-        itemName: "",
+        itemName: "Unidentified item",
         category: "Uncategorized",
         condition: "GOOD",
         sizeClass: "SMALL",
@@ -1611,18 +2083,34 @@ export function RoomDetailView({
         keepFlag: false,
         willingToSell: false,
       });
-
-      await api.uploadItemPhoto(created.id, file);
-      await api.identifyItem(created.id);
-      const result = await api.getItemPricing(created.id);
-      setComparables(prev => ({ ...prev, [created.id]: result.comparables }));
-      setShowAddItemOptions(false);
-      setRefreshKey((k) => k + 1);
     } catch (err) {
-      setQuickAddError(err instanceof Error ? err.message : "Could not process image. Try again.");
-    } finally {
+      const reason = err instanceof Error ? err.message : "Could not create item. Try again.";
+      setQuickAddError(`Photo item creation failed: ${reason}`);
       setQuickAddBusy(false);
+      setQuickAddStep(null);
+      return;
     }
+
+    // Optimistic insert + close the sheet. The user is no longer blocked.
+    setItems(prev => prev.some(i => i.id === created.id) ? prev : [created, ...prev]);
+    setPendingPhotos(prev => ({
+      ...prev,
+      [created.id]: { stage: "uploading", file, checkpoint: "create" },
+    }));
+    setLastAddedId(created.id);
+    setAddCount(c => c + 1);
+    setShowAddItemOptions(false);
+    setQuickAddBusy(false);
+    setQuickAddStep(null);
+
+    // Auto-reopen the Add Item sheet only if the user is in auto-add mode.
+    // The user opts out by manually closing the sheet (× / swipe / backdrop).
+    window.setTimeout(() => {
+      if (isMountedRef.current && autoAddModeRef.current) setShowAddItemOptions(true);
+    }, 450);
+
+    // Fire-and-forget the photo → identify → pricing chain. Do not await.
+    void runPhotoChain(created.id, file, "create");
   }
 
   async function handleCameraSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1649,6 +2137,23 @@ export function RoomDetailView({
         <div className="detail-title-block">
           <h2 className="detail-name">{roomName}</h2>
           <p className="detail-route">{roomType}</p>
+          {items.length > 0 && (
+            <p
+              className="room-progress-meta"
+              style={{
+                margin: "2px 0 0",
+                fontSize: 12,
+                fontWeight: 500,
+                color: "var(--text-muted, #94a3b8)",
+                letterSpacing: 0.1,
+              }}
+            >
+              {items.length} item{items.length === 1 ? "" : "s"}
+              {remainingItemCount !== items.length && (
+                <span style={{ opacity: 0.75 }}> · {remainingItemCount} remaining</span>
+              )}
+            </p>
+          )}
           {roomWeight > 0 && <p className="room-weight-total">Est. weight: {roomWeight} lbs</p>}
         </div>
       </div>
@@ -1676,16 +2181,21 @@ export function RoomDetailView({
             <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px", lineHeight: 1.4 }}>
               Use the LiDAR scanner to capture this room's layout. You'll be able to see walls, doors, furniture, and place your inventory items on the floor plan.
             </p>
-            <a
-              href="/floorplan"
+            <button
+              type="button"
+              onClick={handleStartRoomScan}
+              disabled={isScanning}
               style={{
                 display: "inline-block", padding: "10px 20px", border: "none", borderRadius: 8,
                 background: "var(--accent, #3b82f6)", color: "#fff",
-                fontSize: 14, fontWeight: 600, cursor: "pointer", textDecoration: "none",
+                fontSize: 14, fontWeight: 600,
+                cursor: isScanning ? "default" : "pointer",
+                opacity: isScanning ? 0.7 : 1,
+                textDecoration: "none",
               }}
             >
-              Go to Floorplan Scanner
-            </a>
+              {isScanning ? "Opening scanner…" : "Go to Floorplan Scanner"}
+            </button>
           </div>
         )}
       </section>
@@ -1694,14 +2204,8 @@ export function RoomDetailView({
         <div className="section-heading-row">
           <h3 className="section-heading">Inventory</h3>
           <div className="section-heading-row__actions section-heading-row__actions--inventory">
-            <button className="sheet__btn sheet__btn--primary room-add-primary" type="button" onClick={() => setShowAddItemOptions(true)}>
+            <button className="sheet__btn sheet__btn--primary room-add-primary" type="button" onClick={() => { setAutoAddMode(true); setShowAddItemOptions(true); }}>
               Add Item
-            </button>
-            <button className="voice-capture-btn" type="button" onClick={() => openIntake("voice")}>
-              Voice
-            </button>
-            <button className="voice-capture-btn" type="button" onClick={() => openIntake("walkthrough")}>
-              Walkthrough
             </button>
           </div>
         </div>
@@ -1802,54 +2306,119 @@ export function RoomDetailView({
         )}
 
         {loading ? (
-          <p className="loading">Loading items...</p>
+          <SkeletonList count={3} label="Loading items" />
         ) : items.length === 0 ? (
           <p className="empty">No items yet. Use Add Item to start this room inventory.</p>
         ) : (
           <div className="item-list">
-            {items.map((item) => (
-              <ItemReadCard
-                key={item.id}
-                item={item}
-                selectMode={selectMode}
-                selected={selectedIds.has(item.id)}
-                onToggleSelect={toggleSelect}
-                onEdit={setEditingItemId}
-                onIdentify={handleIdentify}
-                onPricing={handlePricing}
-                onConfirm={handleConfirm}
-                onItemUpdated={handleItemUpdated}
-                identifying={identifying === item.id}
-                pricing={pricing === item.id}
-                confirming={confirming}
-                comparables={comparables[item.id] ?? []}
-                identifyError={identifyError === item.id}
-                identifyErrorMsg={identifyError === item.id ? (identifyErrorMsg ?? undefined) : undefined}
-                identifyWarning={identifyWarning === item.id}
-                pricingError={pricingError === item.id}
-                collapseSignal={collapseScannedSignal}
-                expandSignal={expandScannedSignal}
-                onFullAnalysis={handleFullAnalysis}
-                analyzing={analyzingId === item.id}
-                analysisStep={analyzingId === item.id ? analysisStep : null}
-                decision={decisions[item.id] ?? null}
-                onCorrectAndReprice={handleCorrectAndReprice}
-                correcting={correctingId === item.id}
-                correctError={correctErrorByItem[item.id] ?? null}
-                onMarkAction={handleMarkAction}
-                onPlanAction={handlePlanAction}
-                actioning={actionBusyId === item.id}
-                actionError={actionErrorByItem[item.id] ?? null}
-              />
-            ))}
+            {items.map((item) => {
+              const pending = pendingPhotos[item.id];
+              return (
+                <div
+                  key={item.id}
+                  ref={item.id === lastAddedId ? newItemAnchorRef : undefined}
+                  className="item-row"
+                  style={{ position: "relative" }}
+                >
+                  {pending && (
+                    <PhotoProcessingBadge
+                      stage={pending.stage}
+                      errorMessage={pending.errorMessage}
+                      onRetry={() => retryPendingPhoto(item.id)}
+                    />
+                  )}
+                  <div
+                    style={{
+                      opacity: pending && pending.stage !== "error" ? 0.5 : 1,
+                      filter: pending && pending.stage !== "error" ? "grayscale(20%)" : "none",
+                      transition: "opacity 180ms ease, filter 180ms ease",
+                    }}
+                  >
+                    <ItemReadCard
+                      item={item}
+                      selectMode={selectMode}
+                      selected={selectedIds.has(item.id)}
+                      onToggleSelect={toggleSelect}
+                      onEdit={setEditingItemId}
+                      onIdentify={handleIdentify}
+                      onPricing={handlePricing}
+                      onConfirm={handleConfirm}
+                      onItemUpdated={handleItemUpdated}
+                      // Identification/pricing-dependent buttons stay disabled while
+                      // the optimistic photo flow is mid-pipeline — re-firing them
+                      // would race the in-flight chain. Mark/plan/edit/select are
+                      // unaffected and remain interactive.
+                      identifying={identifying === item.id || (pending != null && pending.stage !== "error")}
+                      pricing={pricing === item.id || (pending != null && pending.stage !== "error")}
+                      confirming={confirming}
+                      comparables={comparables[item.id] ?? []}
+                      identifyError={identifyError === item.id}
+                      identifyErrorMsg={identifyError === item.id ? (identifyErrorMsg ?? undefined) : undefined}
+                      identifyWarning={identifyWarning === item.id}
+                      pricingError={pricingError === item.id}
+                      collapseSignal={collapseScannedSignal}
+                      expandSignal={expandScannedSignal}
+                      onFullAnalysis={handleFullAnalysis}
+                      analyzing={analyzingId === item.id || (pending != null && pending.stage !== "error")}
+                      analysisStep={analyzingId === item.id ? analysisStep : null}
+                      decision={decisions[item.id] ?? null}
+                      onCorrectAndReprice={handleCorrectAndReprice}
+                      correcting={correctingId === item.id}
+                      correctError={correctErrorByItem[item.id] ?? null}
+                      onMarkAction={handleMarkAction}
+                      onPlanAction={handlePlanAction}
+                      actioning={actionBusyId === item.id}
+                      actionError={actionErrorByItem[item.id] ?? null}
+                    />
+                  </div>
+                  {item.id === lastAddedId && (
+                    <PostAddNudge
+                      compact={addCount > 3}
+                      onAddAnother={() => {
+                        dismissPostAdd();
+                        setAutoAddMode(true);
+                        setShowAddItemOptions(true);
+                      }}
+                      onPlan={async (action) => {
+                        const ok = await handlePlanAction(item.id, action);
+                        if (ok) dismissPostAdd();
+                      }}
+                      onDismiss={dismissPostAdd}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
 
+      {showDoneNudge && !doneNudgeDismissed && (
+        <DoneRoomNudge
+          onReview={() => {
+            setShowDoneNudge(false);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+            setActivityTick(n => n + 1);
+          }}
+          onNextRoom={() => {
+            setDoneNudgeDismissed(true);
+            onBack();
+          }}
+          onDismiss={() => {
+            setShowDoneNudge(false);
+            setDoneNudgeDismissed(true);
+          }}
+        />
+      )}
+
       <BottomSheet
         open={showAddItemOptions}
         onClose={() => {
-          if (!quickAddBusy) setShowAddItemOptions(false);
+          if (quickAddBusy) return;
+          // Manual dismiss → opt out of auto-reopen until the user opens the
+          // sheet again themselves.
+          setAutoAddMode(false);
+          setShowAddItemOptions(false);
         }}
         title="Add Item"
       >
@@ -1860,19 +2429,61 @@ export function RoomDetailView({
             disabled={quickAddBusy}
             onClick={() => cameraInputRef.current?.click()}
           >
-            {quickAddBusy ? "Processing..." : "Take Photo"}
+            {quickAddBusy ? "Processing…" : "Take Photo"}
           </button>
+          {quickAddBusy && quickAddStep && (
+            <div
+              className="add-item-sheet__progress"
+              role="status"
+              aria-live="polite"
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "10px 12px", marginTop: 8,
+                background: "var(--bg-card, rgba(59,130,246,0.08))",
+                border: "1px solid var(--border-soft, rgba(59,130,246,0.25))",
+                borderRadius: 10, fontSize: 13, color: "var(--text-secondary, #cbd5e1)",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 14, height: 14, borderRadius: "50%",
+                  border: "2px solid currentColor", borderTopColor: "transparent",
+                  animation: "moveiq-skeleton-pulse 1s linear infinite",
+                  display: "inline-block",
+                }}
+              />
+              <span>{QUICK_ADD_STEP_LABEL[quickAddStep]}</span>
+              <span style={{ marginLeft: "auto", opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>
+                {quickAddStep === "creating" ? "1/4"
+                 : quickAddStep === "uploading" ? "2/4"
+                 : quickAddStep === "identifying" ? "3/4"
+                 : "4/4"}
+              </span>
+            </div>
+          )}
           <button
             type="button"
             className="sheet__btn sheet__btn--secondary add-item-sheet__option"
             disabled={quickAddBusy}
             onClick={() => galleryInputRef.current?.click()}
           >
-            Choose from Gallery
+            Upload from Gallery
           </button>
           <button
             type="button"
-            className="add-item-sheet__manual-link"
+            className="sheet__btn sheet__btn--secondary add-item-sheet__option"
+            disabled={quickAddBusy}
+            onClick={() => {
+              setShowAddItemOptions(false);
+              openIntake("voice");
+            }}
+          >
+            Voice Input
+          </button>
+          <button
+            type="button"
+            className="sheet__btn sheet__btn--secondary add-item-sheet__option"
             disabled={quickAddBusy}
             onClick={() => {
               setShowAddItemOptions(false);
@@ -1880,6 +2491,17 @@ export function RoomDetailView({
             }}
           >
             Manual Entry
+          </button>
+          <button
+            type="button"
+            className="add-item-sheet__manual-link"
+            disabled={quickAddBusy}
+            onClick={() => {
+              setShowAddItemOptions(false);
+              openIntake("walkthrough");
+            }}
+          >
+            Room Walkthrough (multi-item)
           </button>
           {quickAddError && <p className="form-error">{quickAddError}</p>}
           <p className="add-item-sheet__hint">Photo flow runs identification, pricing, and recommendations automatically.</p>

@@ -30,6 +30,7 @@ interface SpeechRecognition extends EventTarget {
 import { useEffect, useRef, useState } from "react";
 import type { ItemCondition, ItemDecisionAction, SizeClass } from "../types";
 import { api } from "../api";
+import { useToast } from "./ui/Toast";
 
 interface VoiceCaptureProps {
   projectId: string;
@@ -76,6 +77,7 @@ export function VoiceCapture({
   onCancel,
   onWalkthroughComplete,
 }: VoiceCaptureProps) {
+  const { showToast } = useToast();
   const [captureState, setCaptureState] = useState<CaptureState>("idle");
   const [finalTranscript, setFinalTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -267,7 +269,12 @@ export function VoiceCapture({
       }
       // Upload photo if captured
       if (photoFile && item.id) {
-        try { await api.uploadItemPhoto(item.id, photoFile); } catch { /* photo upload failed, item still saved */ }
+        try {
+          await api.uploadItemPhoto(item.id, photoFile);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "photo upload failed";
+          showToast(`Item saved, but photo failed to upload: ${msg}`, "error", { persist: true });
+        }
       }
       if (walkthrough) {
         setCreatedItemIds(prev => [...prev, item.id]);

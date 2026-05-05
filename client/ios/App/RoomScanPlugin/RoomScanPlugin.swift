@@ -116,10 +116,11 @@ extension RoomScanPlugin: RoomCaptureViewControllerDelegate {
                     payload["usdzPath"] = usdzPath
                 }
 
+                let finalPayload = payload
                 await MainActor.run {
                     self.captureController?.dismiss(animated: true)
                     self.captureController = nil
-                    self.currentCall?.resolve(payload)
+                    self.currentCall?.resolve(finalPayload)
                     self.currentCall = nil
                 }
             } catch {
@@ -424,13 +425,18 @@ public class RoomCaptureViewController: UIViewController {
     private func setupHUD() {
         view.backgroundColor = .black
 
-        cancelButton = UIButton(type: .system)
-        cancelButton.setTitle("Cancel", for: .normal)
-        cancelButton.setTitleColor(.white, for: .normal)
-        cancelButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
-        cancelButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
-        cancelButton.layer.cornerRadius = 20
-        cancelButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        var cancelConfig = UIButton.Configuration.plain()
+        cancelConfig.title = "Cancel"
+        cancelConfig.baseForegroundColor = .white
+        cancelConfig.background.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        cancelConfig.background.cornerRadius = 20
+        cancelConfig.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+        cancelConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = .systemFont(ofSize: 17, weight: .semibold)
+            return outgoing
+        }
+        cancelButton = UIButton(configuration: cancelConfig)
         cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(cancelButton)

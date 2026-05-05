@@ -9,6 +9,7 @@ import {
   formatItemCountLabel,
 } from "../utils/formatItemDisplay";
 import { itemLifecycle } from "../utils/itemStatus";
+import { SkeletonList } from "./ui/Skeleton";
 
 type InventoryMode = "category" | "room" | "status" | "lifecycle";
 type InventoryScope = "active" | "all";
@@ -102,7 +103,7 @@ export function InventoryBrowser() {
   const totalCount = filteredItems.length;
   const weakCount = countWeakItems(filteredItems);
 
-  if (loading) return <p className="loading">Loading inventory...</p>;
+  if (loading) return <SkeletonList count={4} label="Loading inventory" />;
 
   const groups: Array<{ key: string; label: string; items: Item[] }> = (() => {
     if (mode === "category") {

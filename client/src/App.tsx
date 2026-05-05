@@ -12,6 +12,7 @@ import { setUserId, clearUserId, clearAll as clearScanCache } from "./plugins/sc
 import type { UserPublic } from "./types";
 import { AppLayout } from "./components/AppLayout";
 import { AuthScreen } from "./components/AuthScreen";
+import { SkeletonList } from "./components/ui/Skeleton";
 import { ProfileView } from "./components/ProfileView";
 import { ProjectDetailView } from "./components/ProjectDetailView";
 import { PricingAnalysis } from "./components/PricingAnalysis";
@@ -80,7 +81,7 @@ function RoomRoute() {
   }, [params.projectId, params.roomId]);
 
   if (!params.projectId || !params.roomId) return <Navigate to="/" replace />;
-  if (loading) return <p className="loading">Loading room...</p>;
+  if (loading) return <SkeletonList count={3} label="Loading room" />;
   if (!roomMeta) return <p className="form-error">Room not found.</p>;
 
   return (
@@ -89,7 +90,7 @@ function RoomRoute() {
       roomId={params.roomId}
       roomName={roomMeta.name}
       roomType={roomMeta.type}
-      onBack={() => navigate("/rooms")}
+      onBack={() => navigate(`/projects/${params.projectId}`)}
     />
   );
 }
@@ -183,7 +184,7 @@ function App() {
   }
 
   if (!authChecked) {
-    return <div className="auth-screen"><p className="loading">Loading...</p></div>;
+    return <div className="auth-screen"><SkeletonList count={2} label="Loading" /></div>;
   }
 
   if (!user) {

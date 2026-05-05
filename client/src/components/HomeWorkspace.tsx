@@ -7,6 +7,7 @@ import { ProjectSwitcherSheet } from "./ProjectSwitcherSheet";
 import { ProjectForm } from "./ProjectForm";
 import { formatItemDisplay, countWeakItems } from "../utils/formatItemDisplay";
 import { itemIntent, isUndecidedItem } from "../utils/itemStatus";
+import { SkeletonList } from "./ui/Skeleton";
 
 const PRIORITY_PREVIEW_COUNT = 5;
 
@@ -65,7 +66,7 @@ export function HomeWorkspace() {
     return () => { cancelled = true; };
   }, [activeProject]);
 
-  if (loading) return <p className="loading">Loading...</p>;
+  if (loading) return <SkeletonList count={3} label="Loading" />;
 
   if (projects.length === 0) {
     return (

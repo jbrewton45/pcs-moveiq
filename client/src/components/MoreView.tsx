@@ -4,6 +4,7 @@ import type { Project, Item } from "../types";
 import { api } from "../api";
 import { useActiveProject } from "../context/ActiveProjectContext";
 import { formatItemDisplay } from "../utils/formatItemDisplay";
+import { SkeletonList } from "./ui/Skeleton";
 
 function downloadJson(data: unknown, filename: string) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -71,7 +72,7 @@ export function MoreView() {
           Your moves
         </header>
         {loading ? (
-          <p className="loading">Loading...</p>
+          <SkeletonList count={2} label="Loading" />
         ) : projects.length === 0 ? (
           <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>No moves yet. Create one from the Home tab.</p>
         ) : (

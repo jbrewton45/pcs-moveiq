@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { ProviderStatus, ProviderTestResult } from "../api";
 import { useAppUpdate } from "../hooks/useAppUpdate";
+import { useToast } from "./ui/Toast";
+import { SkeletonList } from "./ui/Skeleton";
 
 const MODE_LABEL: Record<string, string> = {
   live: "Live",
@@ -40,6 +42,7 @@ interface Props {
 }
 
 export function ProviderSettings({ onBack }: Props) {
+  const { showToast } = useToast();
   const [status, setStatus] = useState<ProviderStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [testingClaude, setTestingClaude] = useState(false);
@@ -61,8 +64,10 @@ export function ProviderSettings({ onBack }: Props) {
         ...prev,
         claude: { ...prev.claude, lastTest: result },
       } : prev);
-    } catch { /* silent */ }
-    finally { setTestingClaude(false); }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Claude test failed";
+      showToast(`Claude test failed: ${msg}`, "error", { persist: true });
+    } finally { setTestingClaude(false); }
   }
 
   async function handleTestOpenAI() {
@@ -73,8 +78,10 @@ export function ProviderSettings({ onBack }: Props) {
         ...prev,
         openai: { ...prev.openai, lastTest: result },
       } : prev);
-    } catch { /* silent */ }
-    finally { setTestingOpenai(false); }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "OpenAI test failed";
+      showToast(`OpenAI test failed: ${msg}`, "error", { persist: true });
+    } finally { setTestingOpenai(false); }
   }
 
   async function handleTestEbay() {
@@ -85,15 +92,17 @@ export function ProviderSettings({ onBack }: Props) {
         ...prev,
         ebay: { ...prev.ebay, lastTest: result },
       } : prev);
-    } catch { /* silent */ }
-    finally { setTestingEbay(false); }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "eBay test failed";
+      showToast(`eBay test failed: ${msg}`, "error", { persist: true });
+    } finally { setTestingEbay(false); }
   }
 
   if (loading) {
     return (
       <div>
         <button className="back-btn" onClick={onBack}>← Back</button>
-        <p className="loading">Loading provider status...</p>
+        <SkeletonList count={2} label="Loading provider status" />
       </div>
     );
   }
@@ -277,7 +286,7 @@ function AppInfoSection() {
         <div className="provider-card__field">
           <span className="provider-card__field-label">Platform</span>
           <code className="provider-card__field-value">
-            {update.isAndroid ? "Android" : "Web"}
+            {update.isAndroid ? "Android" : update.isIOS ? "iOS" : "Web"}
           </code>
         </div>
         {update.isAndroid && (
@@ -298,7 +307,7 @@ function AppInfoSection() {
             {update.status === "downloading" && `Downloading${update.downloadPercent != null ? ` (${update.downloadPercent}%)` : "..."}`}
             {update.status === "updating" && "Installing..."}
             {update.status === "error" && (update.error ?? "Error")}
-            {(update.status === "idle" || update.status === "dismissed") && (update.isAndroid ? "Not checked" : "N/A (web)")}
+            {(update.status === "idle" || update.status === "dismissed") && (update.isAndroid ? "Not checked" : update.isIOS ? "N/A (iOS)" : "N/A (web)")}
           </code>
         </div>
       </div>

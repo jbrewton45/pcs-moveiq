@@ -90,7 +90,21 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        const msg = (body as Record<string, unknown>).error as string ?? `${res.status} ${res.statusText}`;
+        const rec = body as Record<string, unknown>;
+        const baseMsg = (rec.error as string) ?? `${res.status} ${res.statusText}`;
+        // Surface the first zod issue (path + message) so callers/UIs can show the
+        // actual failing field instead of just "Validation failed".
+        const details = Array.isArray(rec.details) ? rec.details as Array<Record<string, unknown>> : null;
+        let msg = baseMsg;
+        if (details && details.length > 0) {
+          const first = details[0];
+          const pathArr = Array.isArray(first.path) ? first.path : [];
+          const fieldPath = pathArr.length > 0 ? pathArr.join(".") : null;
+          const detailMsg = typeof first.message === "string" ? first.message : null;
+          if (fieldPath && detailMsg) msg = `${baseMsg}: ${fieldPath}: ${detailMsg}`;
+          else if (detailMsg) msg = `${baseMsg}: ${detailMsg}`;
+          else if (fieldPath) msg = `${baseMsg}: ${fieldPath}`;
+        }
         console.error(`[api] ✗ ${method} ${url} → ${msg}`);
         throw new Error(msg);
       }

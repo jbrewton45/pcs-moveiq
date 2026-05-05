@@ -1869,15 +1869,20 @@
 }
 
 .btn-photo-replace {
-  padding: 0.35rem 0.75rem;
+  padding: 0.5rem 1rem;
+  min-height: 44px;
+  min-width: 44px;
   font-size: 0.8rem;
-  font-weight: 600;
+  font-weight: 500;
   border: 1px solid var(--color-border, #ccc);
   border-radius: 0.375rem;
   background: transparent;
   color: var(--color-accent, #aa3bff);
+  opacity: 0.82;
   cursor: pointer;
+  transition: opacity 140ms ease;
 }
+.btn-photo-replace:not(:disabled):hover { opacity: 1; }
 .btn-photo-replace:hover:not(:disabled) { border-color: var(--color-accent, #aa3bff); }
 .btn-photo-replace:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -2299,22 +2304,40 @@
   padding-top: 0.5rem;
   border-top: 1px solid var(--color-border, #e0e0e0);
 }
+/* Secondary action — softer weight + slightly muted color so the per-card
+   primary CTA (filled accent button) reads as the obvious next step. */
 .btn-action-sm {
-  padding: 0.3rem 0.65rem;
+  padding: 0.5rem 0.9rem;
+  min-height: 44px;
+  min-width: 44px;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: 0.1px;
   border: 1px solid var(--color-accent, #aa3bff);
   border-radius: 0.375rem;
   background: transparent;
   color: var(--color-accent, #aa3bff);
+  opacity: 0.82;
   cursor: pointer;
+  transition: opacity 140ms ease, background-color 140ms ease;
 }
 .btn-action-sm:hover:not(:disabled) {
   background: rgba(170, 59, 255, 0.07);
+  opacity: 1;
 }
 .btn-action-sm:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+}
+/* When .btn-action-sm is overridden inline as a filled primary (e.g. the
+   per-card "Analyze Item" CTA), restore full weight + opacity so it reads
+   as the dominant next action. */
+.btn-action-sm[style*="background: var(--accent"],
+.btn-action-sm[style*="background:var(--accent"] {
+  font-weight: 700;
+  opacity: 1;
+  letter-spacing: 0.2px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 /* Dark mode for new elements */
@@ -4088,7 +4111,8 @@
   gap: 8px;
 }
 .mark-done-popover__option {
-  padding: 8px 10px;
+  padding: 12px 14px;
+  min-height: 44px;
   border: 1px solid var(--border-soft, #e5e7eb);
   border-radius: 6px;
   background: transparent;

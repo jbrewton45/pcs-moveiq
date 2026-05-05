@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import type { PluginListenerHandle } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
 
 // ---------------------------------------------------------------------------
 // Native bridge types
@@ -63,6 +64,7 @@ export type UpdateStatus =
 export interface AppUpdateState {
   status: UpdateStatus;
   isAndroid: boolean;
+  isIOS: boolean;
   testerSignedIn: boolean;
   versionName: string | null;
   versionCode: number | null;
@@ -78,6 +80,7 @@ export interface AppUpdateState {
 
 export function useAppUpdate(): AppUpdateState {
   const isAndroid = Capacitor.getPlatform() === "android";
+  const isIOS = Capacitor.getPlatform() === "ios";
 
   const [status, setStatus] = useState<UpdateStatus>("idle");
   const [testerSignedIn, setTesterSignedIn] = useState(false);
@@ -93,15 +96,23 @@ export function useAppUpdate(): AppUpdateState {
 
   // Load app info + sign-in status on mount
   useEffect(() => {
-    if (!isAndroid) return;
-    AppUpdate.getAppInfo()
-      .then((info) => {
-        setVersionName(info.versionName);
-        setVersionCode(info.versionCode);
-        setTesterSignedIn(info.testerSignedIn);
-      })
-      .catch(() => {});
-  }, [isAndroid]);
+    if (isAndroid) {
+      AppUpdate.getAppInfo()
+        .then((info) => {
+          setVersionName(info.versionName);
+          setVersionCode(info.versionCode);
+          setTesterSignedIn(info.testerSignedIn);
+        })
+        .catch(() => {});
+    } else if (isIOS) {
+      CapacitorApp.getInfo()
+        .then((info) => {
+          setVersionName(info.version);
+          setVersionCode(Number(info.build) || 0);
+        })
+        .catch(() => {});
+    }
+  }, [isAndroid, isIOS]);
 
   // Listen for download progress events from native
   useEffect(() => {
@@ -204,6 +215,7 @@ export function useAppUpdate(): AppUpdateState {
   return {
     status,
     isAndroid,
+    isIOS,
     testerSignedIn,
     versionName,
     versionCode,
